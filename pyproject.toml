@@ -1,0 +1,9 @@
+[project]
+name = "myfridger-be"
+version = "0.1.0"
+description = "Cloud Project Group G - Backend for MyFridger Application"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi[standard]>=0.121.2",
+]
