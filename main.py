@@ -1,15 +1,26 @@
-from typing import Union
-
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
+from core.db import engine
+from api import api_router
 
-app = FastAPI()
-
-
-@app.get("/")
-async def read_root():
-    return {"Hello": "World"}
+from models import SQLModel
+import logging
 
 
-@app.get("/items/{item_id}")
-async def read_item(item_id: int, q: Union[str, None] = None):
-    return {"item_id": item_id, "q": q}
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logging.basicConfig(level=logging.INFO)
+
+    async with engine.begin() as conn:
+        await conn.run_sync(SQLModel.metadata.create_all)
+
+    yield
+
+
+app = FastAPI(
+    title="MyFridger API",
+    lifespan=lifespan,
+    swagger_ui_parameters={"persistAuthorization": True},
+)
+
+app.include_router(api_router)
