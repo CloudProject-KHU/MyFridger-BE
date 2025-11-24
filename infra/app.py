@@ -5,13 +5,9 @@ from stacks.backend import BackendStack
 
 from utils import Config
 
-env = cdk.Environment(
-    account=Config.get("Account"),
-    region=Config.get("Region")
-)
 app = cdk.App()
 
-BackendStack(app, "FridgerBackend", env=env)
+BackendStack(app, "FridgerBackend")
 # ReceiptAnalysisStack(app, "ReceiptAnalysis", env=env)
 
 app.synth()

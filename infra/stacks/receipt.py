@@ -11,7 +11,7 @@ from aws_cdk import (
 )
 from constructs import Construct
 
-from infra.utils import Config
+from utils import Config
 
 
 class ReceiptAnalysisStack(Stack):
@@ -49,9 +49,9 @@ class ReceiptAnalysisStack(Stack):
 
         db_instance = rds.DatabaseInstance.from_database_instance_attributes(
             self,
-            "fridger-db",
-            instance_identifier="fridger-db",
-            instance_endpoint_address="TODO",  # "fridger-db.cluster-custom.us-east-1.rds.amazonaws.com",
+            "BackendDBInstance",
+            instance_identifier="BackendDBInstance",
+            instance_endpoint_address="TODO",  # "BackendDBInstance.cluster-custom.us-east-1.rds.amazonaws.com",
             port=5432,
             security_groups=[rds_sg],
         )
