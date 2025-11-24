@@ -76,7 +76,7 @@ class BackendStack(Stack):
         database_username = "fridger"
         credentials = rds.Credentials.from_generated_secret(
             username=database_username,
-            exclude_characters='"@/\\',
+            exclude_characters='"@/\\\"\'',
         )
         db_instance = rds.DatabaseInstance(
             self,
@@ -140,9 +140,15 @@ class BackendStack(Stack):
             security_group=ec2_sg,
             key_name=key_pair.key_name,
         )
+
+        if db_instance.secret is None:
+            raise ValueError("DB instance secret is None")
+
         app_asset.grant_read(ec2_instance.role)
+        db_instance.secret.grant_read(ec2_instance.role)
 
         environment_variables = {
+            "ENVIRONMENT": "production",
             "DATABASE_HOST": db_instance.db_instance_endpoint_address,
             "DATABASE_PORT": "5432",
             "DATABASE_NAME": database_name,
@@ -150,6 +156,8 @@ class BackendStack(Stack):
             "DATABASE_PASSWORD": (
                 credentials.password if credentials.password is not None else ""
             ),
+            "DB_SECRET_NAME": db_instance.secret.secret_name,
+            "AWS_REGION": self.region,
         }
         env_content = "\n".join([f"{k}={v}" for k, v in environment_variables.items()])
         commands = ec2.UserData.for_linux()
@@ -157,15 +165,25 @@ class BackendStack(Stack):
             # 필수 패키지 설치
             "dnf update -y",
             "dnf install -y python3-pip unzip",
-            "curl -LsSf https://astral.sh/uv/install.sh | sh",  # uv 설치
+            "curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR='/usr/local/bin' sh",  # uv 설치
+
             # 애플리케이션 코드 다운로드
             "mkdir -p ~/app",
             f"aws s3 cp {app_asset.s3_object_url} ~/app/app.zip",
+
             # 어플리케이션 압축 해제
             "unzip ~/app/app.zip -d ~/app",
             f"cat <<EOF > ~/app/.env\n{env_content}\nEOF",  # .env 생성
+
+            # Secrets Manager에서 비밀번호 파싱 후 .env에 추가
+            f"export DB_SECRET_NAME={db_instance.secret.secret_name}",
+            f"export AWS_REGION={self.region}",
+            "SECRET_JSON=$(aws secretsmanager get-secret-value --secret-id $DB_SECRET_NAME --region $AWS_REGION --query SecretString --output text)",
+            "DB_PASSWORD=$(echo $SECRET_JSON | jq -r .password)",
+            "echo \"DATABASE_PASSWORD=$DB_PASSWORD\" >> ~/app/.env",
+
             # 의존성 설치 및 실행
-            "uv sync",
-            "nohup uv run uvicorn main:app --host 0.0.0.0 --port 80 --app-dir ~/app",
+            "cd ~/app && uv sync",
+            "cd ~/app && nohup uv run uvicorn app.main:app --host 0.0.0.0 --port 80 --app-dir ~/app",
         )
         ec2_instance.add_user_data(commands.render())
