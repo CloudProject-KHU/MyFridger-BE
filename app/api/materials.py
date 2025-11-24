@@ -4,8 +4,8 @@ from sqlmodel import select, delete
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlalchemy import func
 
-from core.db import get_session
-from models import (
+from app.core.db import get_session
+from app.models import (
     Material,
     MaterialCreate,
     MaterialUpdate,

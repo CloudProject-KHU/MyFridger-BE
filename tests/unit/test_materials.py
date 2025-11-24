@@ -1,14 +1,14 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 from fastapi import status
-from api.materials import (
+from app.api.materials import (
     get_materials,
     create_material,
     get_material,
     update_material,
     delete_material,
 )
-from models import Material, MaterialCreate, MaterialUpdate, Pagination
+from app.models import Material, MaterialCreate, MaterialUpdate, Pagination
 from datetime import datetime, timezone
 
 

@@ -1,9 +1,9 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
-from core.db import engine
-from api import api_router
+from app.core.db import engine
+from app.api import api_router
 
-from models import SQLModel
+from app.models import SQLModel
 import logging
 
 
