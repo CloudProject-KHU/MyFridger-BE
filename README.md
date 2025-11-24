@@ -11,17 +11,17 @@ uv sync
 
 ## Dev
 ```bash
-uv run fastapi dev main.py
+uv run fastapi dev app/main.py
 ```
 
 ### Migration
 - Migration 생성
 ```bash
-alembic revision --autogenerate -m "[MIGRATION_MESSAGE]"
+uv run alembic revision --autogenerate -m "[MIGRATION_MESSAGE]"
 ```
 - DB에 적용
 ```bash
-alembic upgrade head
+uv run alembic upgrade head
 ```
 
 ### Test
