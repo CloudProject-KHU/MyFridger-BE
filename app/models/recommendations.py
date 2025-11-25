@@ -22,6 +22,7 @@ class RecommendationResponse(SQLModel):
     id: int
     recipe_id: int
     name: str
+    thumbnail_url: str
 
 
 class RecommendationListResponse(SQLModel):

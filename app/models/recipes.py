@@ -8,6 +8,7 @@ class RecipeBase(SQLModel):
     recipe_pat: str # 국&찌개
     method: str  # 조리 방법 (예: 찌기, 볶기 등)
     name: str
+    thumbnail_url: str
 
 
 class Recipe(RecipeBase, table=True):

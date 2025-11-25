@@ -25,8 +25,11 @@ async def get_recipe_instruction(
 
     return RecipeResponse(
         recipe_id=recipe.recipe_id,
+        recipe_pat=recipe.recipe_pat,
         method=recipe.method,
         name=recipe.name,
         instructions=recipe.instructions,
         material_names=recipe.material_names,
+        image_url=recipe.image_url,
+        thumbnail_url=recipe.thumbnail_url,
     )

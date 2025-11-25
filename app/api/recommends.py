@@ -12,7 +12,7 @@ from models import (
     RecommendationListResponse,
     Material,
 )
-from services import ai_service
+# from services import ai_service
 
 router = APIRouter()
 
@@ -72,7 +72,7 @@ async def get_recommended_recipes(
             {"name": m.name, "quantity": m.quantity, "quantity_unit": m.quantity_unit} for m in materials
         ]
 
-        # AI 추천 받기 e.g.[{"recipe_id":1, "name":"새우 두부 계란찜", ...] (== [{"recipe_id": 1, "name":"레시피 이름"}, {...}, ...])
+        # AI 추천 받기 e.g.[{"recipe_id":1, "name":"새우 두부 계란찜", "thumbnail_url":"s3.abcd", ...] (== [{"recipe_id": 1, "name":"레시피 이름", "thumbnail_url":"썸네일 url"}, {...}, ...])
         recommended_recipe_ids = await ai_service.recommend_recipes(material_dicts)
 
         # 추천 목록을 DB에 저장하고 반환
@@ -95,7 +95,12 @@ async def get_recommended_recipes(
                 recommendation = existing
 
             recommendations.append(
-                RecommendationResponse(id=recommendation.id, recipe_id=recipe["recipe_id"], name=recipe["name"])
+                RecommendationResponse(
+                    id=recommendation.id,
+                    recipe_id=recipe["recipe_id"],
+                    name=recipe["name"],
+                    thumbnail_url=recipe["thumbnail_url"]
+                    )
             )
 
         await session.commit()
