@@ -8,6 +8,7 @@ from aws_cdk import (
     aws_ec2 as ec2,
     aws_rds as rds,
     aws_s3_assets as s3_assets,
+    aws_secretsmanager as secretsmanager,
 )
 from constructs import Construct
 
@@ -29,6 +30,31 @@ class BackendStack(Stack):
         is_production = Config.get("Production", False)
         removal_policy = (
             RemovalPolicy.RETAIN if is_production else RemovalPolicy.DESTROY
+        )
+
+        # Food Safety API Key를 Secret Manager에 저장
+        self.food_safety_api_secret = secretsmanager.Secret(
+            self,
+            "FoodSafetyAPISecret",
+            secret_name="fridger/food-safety-api-key",
+            description="Food Safety Korea API Key",
+            secret_string_value=SecretValue.unsafe_plain_text(
+                '{"api_key": "YOUR_API_KEY_HERE"}'  # 배포 후 콘솔에서 변경
+            )
+        )
+
+        # Recipe Sync Metadata를 Secret Manager에 저장
+        # 초기값은 20000101로 설정
+        from datetime import datetime
+        initial_date = "20000101"
+        self.recipe_sync_metadata_secret = secretsmanager.Secret(
+            self,
+            "RecipeSyncMetadataSecret",
+            secret_name="fridger/recipe-sync-metadata",
+            description="Recipe sync metadata including last sync date",
+            secret_object_value=SecretValue.unsafe_plain_text(
+                f'{{"last_sync_date": "{initial_date}"}}'
+            )
         )
 
         # VPC 설정

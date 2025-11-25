@@ -1,6 +1,7 @@
 import re
 from typing import List, Dict, Optional
 import httpx
+import json
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -11,9 +12,92 @@ from utils.s3_helper import s3_helper
 
 class RecipeSyncService:
     def __init__(self):
-        self.api_key = settings.FOOD_SAFETY_API_KEY
         self.base_url = settings.FOOD_SAFETY_API_BASE_URL
+        self._api_key = None
+        self._secrets_client = None
+        self._last_sync_date = None
+
+    def _get_secrets_client(self):
+        """Secrets Manager 클라이언트 생성 (lazy loading)"""
+        if self._secrets_client is None:
+            self._secrets_client = boto3.client(
+                'secretsmanager',
+                region_name=settings.AWS_REGION
+            )
+        return self._secrets_client
     
+
+    def _get_api_key(self) -> str:
+        """
+        Secret Manager에서 API 키 가져오기
+        한 번 가져온 후 캐시에 저장
+        """
+        if self._api_key is not None:
+            return self._api_key
+        
+        # 개발 환경에서는 환경 변수 사용
+        if settings.ENVIRONMENT == "development" and settings.FOOD_SAFETY_API_KEY:
+            self._api_key = settings.FOOD_SAFETY_API_KEY
+            return self._api_key
+        
+        # 프로덕션에서는 Secret Manager에서 가져오기
+        try:
+            client = self._get_secrets_client()
+            response = client.get_secret_value(
+                SecretId='fridger/food-safety-api-key'
+            )
+            secret = json.loads(response['SecretString'])
+            self._api_key = secret['api_key']
+            return self._api_key
+        except Exception as e:
+            print(f"Failed to get API key from Secret Manager: {str(e)}")
+            # fallback to environment variable
+            self._api_key = settings.FOOD_SAFETY_API_KEY
+            return self._api_key
+    
+    def _get_last_sync_date(self) -> Optional[str]:
+        """
+        마지막 동기화 날짜를 Secret Manager에서 가져오기
+        형식: YYYYMMDD (예: 20170101)
+        """
+        try:
+            client = self._get_secrets_client()
+            response = client.get_secret_value(
+                SecretId='fridger/recipe-sync-metadata'
+            )
+            metadata = json.loads(response['SecretString'])
+            return metadata.get('last_sync_date')
+        except Exception as e:
+            print(f"Failed to get last sync date: {str(e)}")
+            # 첫 동기화이거나 실패 시
+            return "20000101"
+    
+    
+    def _update_last_sync_date(self, sync_date: str):
+        """
+        마지막 동기화 날짜를 Secret Manager에 저장
+        """
+        try:
+            client = self._get_secrets_client()
+            client.put_secret_value(
+                SecretId='fridger/recipe-sync-metadata',
+                SecretString=json.dumps({
+                    'last_sync_date': sync_date
+                })
+            )
+        except client.exceptions.ResourceNotFoundException:
+            # Secret이 없으면 생성
+            client.create_secret(
+                Name='fridger/recipe-sync-metadata',
+                Description='Recipe sync metadata including last sync date',
+                SecretString=json.dumps({
+                    'last_sync_date': sync_date
+                })
+            )
+        except Exception as e:
+            print(f"Failed to update last sync date: {str(e)}")
+
+
     def _parse_materials(self, rcp_parts_dtls: str) -> List[str]:
         """
         재료 문자열을 파싱하여 재료 이름 리스트로 변환
@@ -73,15 +157,27 @@ class RecipeSyncService:
         
         return image_urls
     
-    async def fetch_recipes_from_api(self, start: int = 1, end: int = 999) -> List[Dict]:
+    async def fetch_recipes_from_api(
+            self,
+            start: int = 1,
+            end: int = 999
+            change_date: Optional[str] = None
+    ) -> List[Dict]:
         """
         식품의약품안전처 API에서 레시피 데이터 가져오기
         
         Args:
             start: 시작 인덱스
             end: 끝 인덱스 (최대 999개씩 가능)
+            change_date: 변경일자 (YYYYMMDD 형식, 예: 20251126)
+                            이 날짜 이후 변경된 레시피만 가져옴
         """
-        url = f"{self.base_url}/{self.api_key}/COOKRCP01/json/{start}/{end}"
+        self._get_api_key()
+
+        if change_date:
+            url = f"{self.base_url}/{self._api_key}/COOKRCP01/json/{start}/{end}/CHNG_DT={change_date}"
+        else:
+            url = f"{self.base_url}/{self._api_key}/COOKRCP01/json/{start}/{end}"
         
         try:
             async with httpx.AsyncClient(timeout=60.0) as client:
@@ -162,14 +258,25 @@ class RecipeSyncService:
             print(f"Failed to sync recipe {recipe_data.get('RCP_SEQ')}: {str(e)}")
             return None
     
-    async def sync_all_recipes(self, session: AsyncSession, batch_size: int = 500):
+    async def sync_all_recipes(
+            self,
+            session: AsyncSession,
+            batch_size: int = 500,
+            use_incremental: bool = True
+    ):
         """
         모든 레시피를 동기화
         
         Args:
             session: DB 세션
             batch_size: 한 번에 가져올 레시피 수
+            use_incremental: True이면 마지막 동기화 이후 변경된 레시피만 가져옴
         """
+        change_date = None
+        if use_incremental:
+            change_date = self._get_last_sync_date()
+            print(f"Syncing recipes chagned after: {change_date}")
+
         start = 1
         total_synced = 0
         
@@ -177,7 +284,7 @@ class RecipeSyncService:
             end = start + batch_size - 1
             print(f"Fetching recipes {start} to {end}...")
             
-            recipes = await self.fetch_recipes_from_api(start, end)
+            recipes = await self.fetch_recipes_from_api(start, end, change_date)
             
             if not recipes:
                 break
@@ -196,6 +303,11 @@ class RecipeSyncService:
             if len(recipes) < batch_size:
                 break
             start = end + 1
+        
+        if use_incremental and total_synced > 0:
+            today = datetime.now().strftime('%Y%m%d')
+            self._update_last_sync_date(today)
+            print(f"Updated last sync date to: {today}")
         
         print(f"Sync completed. Total synced: {total_synced} recipes")
         return total_synced
