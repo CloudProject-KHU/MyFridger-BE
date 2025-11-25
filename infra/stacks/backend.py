@@ -32,7 +32,7 @@ class BackendStack(Stack):
         )
 
         # VPC 설정
-        vpc = ec2.Vpc(
+        self.vpc = ec2.Vpc(
             self,
             "BackendVpc",
             max_azs=2,
@@ -53,7 +53,7 @@ class BackendStack(Stack):
         ec2_sg = ec2.SecurityGroup(
             self,
             "EC2SecurityGroup",
-            vpc=vpc,
+            vpc=self.vpc,
             description="allow SSH, HTTP, HTTPS",
             allow_all_outbound=True,
         )
@@ -65,7 +65,7 @@ class BackendStack(Stack):
         db_sg = ec2.SecurityGroup(
             self,
             "DBSecurityGroup",
-            vpc=vpc,
+            vpc=self.vpc,
             description="allow EC2 only",
             allow_all_outbound=False,
         )
@@ -76,15 +76,15 @@ class BackendStack(Stack):
         database_username = "fridger"
         credentials = rds.Credentials.from_generated_secret(
             username=database_username,
-            exclude_characters='"@/\\\"\'',
+            exclude_characters='"@/\\"\'',
         )
-        db_instance = rds.DatabaseInstance(
+        self.db_instance = rds.DatabaseInstance(
             self,
             "BackendDBInstance",
             engine=rds.DatabaseInstanceEngine.postgres(
                 version=rds.PostgresEngineVersion.VER_16
             ),
-            vpc=vpc,
+            vpc=self.vpc,
             vpc_subnets=ec2.SubnetSelection(
                 subnet_type=ec2.SubnetType.PRIVATE_ISOLATED
             ),
@@ -128,10 +128,10 @@ class BackendStack(Stack):
             "FridgerKeyPair",
             key_name="fridger-backend",
         )
-        ec2_instance = ec2.Instance(
+        self.ec2_instance = ec2.Instance(
             self,
             "BackendInstance",
-            vpc=vpc,
+            vpc=self.vpc,
             vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PUBLIC),
             instance_type=ec2.InstanceType.of(
                 ec2.InstanceClass.T3, ec2.InstanceSize.MICRO
@@ -141,22 +141,22 @@ class BackendStack(Stack):
             key_name=key_pair.key_name,
         )
 
-        if db_instance.secret is None:
+        if self.db_instance.secret is None:
             raise ValueError("DB instance secret is None")
 
-        app_asset.grant_read(ec2_instance.role)
-        db_instance.secret.grant_read(ec2_instance.role)
+        app_asset.grant_read(self.ec2_instance.role)
+        self.db_instance.secret.grant_read(self.ec2_instance.role)
 
         environment_variables = {
             "ENVIRONMENT": "production",
-            "DATABASE_HOST": db_instance.db_instance_endpoint_address,
+            "DATABASE_HOST": self.db_instance.db_instance_endpoint_address,
             "DATABASE_PORT": "5432",
             "DATABASE_NAME": database_name,
             "DATABASE_USER": database_username,
             "DATABASE_PASSWORD": (
                 credentials.password if credentials.password is not None else ""
             ),
-            "DB_SECRET_NAME": db_instance.secret.secret_name,
+            "DB_SECRET_NAME": self.db_instance.secret.secret_name,
             "AWS_REGION": self.region,
         }
         env_content = "\n".join([f"{k}={v}" for k, v in environment_variables.items()])
@@ -166,24 +166,26 @@ class BackendStack(Stack):
             "dnf update -y",
             "dnf install -y python3-pip unzip",
             "curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR='/usr/local/bin' sh",  # uv 설치
-
             # 애플리케이션 코드 다운로드
             "mkdir -p ~/app",
             f"aws s3 cp {app_asset.s3_object_url} ~/app/app.zip",
-
             # 어플리케이션 압축 해제
             "unzip ~/app/app.zip -d ~/app",
             f"cat <<EOF > ~/app/.env\n{env_content}\nEOF",  # .env 생성
-
             # Secrets Manager에서 비밀번호 파싱 후 .env에 추가
-            f"export DB_SECRET_NAME={db_instance.secret.secret_name}",
+            f"export DB_SECRET_NAME={self.db_instance.secret.secret_name}",
             f"export AWS_REGION={self.region}",
             "SECRET_JSON=$(aws secretsmanager get-secret-value --secret-id $DB_SECRET_NAME --region $AWS_REGION --query SecretString --output text)",
             "DB_PASSWORD=$(echo $SECRET_JSON | jq -r .password)",
-            "echo \"DATABASE_PASSWORD=$DB_PASSWORD\" >> ~/app/.env",
-
+            'echo "DATABASE_PASSWORD=$DB_PASSWORD" >> ~/app/.env',
             # 의존성 설치 및 실행
             "cd ~/app && uv sync",
             "cd ~/app && nohup uv run uvicorn app.main:app --host 0.0.0.0 --port 80 --app-dir ~/app",
         )
-        ec2_instance.add_user_data(commands.render())
+        self.ec2_instance.add_user_data(commands.render())
+
+        self.eip = ec2.CfnEIP(
+            self,
+            "BackendEIP",
+            instance_id=self.ec2_instance.instance_id
+        )
