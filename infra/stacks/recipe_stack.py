@@ -93,14 +93,24 @@ class RecipeStack(Stack):
             runtime=lambda_.Runtime.PYTHON_3_12,
             handler="recipe_sync_handler.lambda_handler",
             code=lambda_.Code.from_asset(
-                "./lambda",
+                "lambda",
                 bundling={
                     "image": lambda_.Runtime.PYTHON_3_12.bundling_image,
                     "command": [
                         "bash", "-c",
+                        # Lambda 패키지 구조:
+                        # /asset-output/
+                        #   ├── recipe_sync_handler.py (handler)
+                        #   ├── requirements.txt
+                        #   ├── app/ (FastAPI 애플리케이션 디렉토리)
+                        #   │   ├── core/
+                        #   │   ├── models/
+                        #   │   ├── services/
+                        #   │   └── utils/
+                        #   └── [installed dependencies from requirements.txt]
                         "pip install -r requirements.txt -t /asset-output && "
                         "cp -r . /asset-output && "
-                        "cp -r ../app /asset-output/"  # app 디렉토리도 포함
+                        "cp -r ../app /asset-output/app"
                     ],
                 }
             ),
@@ -119,6 +129,8 @@ class RecipeStack(Stack):
                 "DATABASE_NAME": database_name,
                 "DATABASE_USER": database_username,
                 "DB_SECRET_NAME": db_instance.secret.secret_name if db_instance.secret else "",
+                "FOOD_SAFETY_API_SECRET_NAME": food_safety_api_secret.secret_name,
+                "RECIPE_SYNC_METADATA_SECRET_NAME": recipe_sync_metadata_secret.secret_name,
                 "AWS_REGION": self.region,
                 "FOOD_SAFETY_API_BASE_URL": "http://openapi.foodsafetykorea.go.kr/api",
                 "S3_BUCKET_NAME": uploads_bucket.bucket_name,

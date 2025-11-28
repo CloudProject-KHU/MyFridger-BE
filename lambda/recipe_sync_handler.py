@@ -11,11 +11,12 @@ import json
 from datetime import datetime
 
 # Lambda 환경에서 app 모듈을 import하기 위한 경로 설정
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'app'))
+# CDK bundling으로 app 디렉토리가 Lambda 패키지 루트에 위치함
+sys.path.insert(0, os.path.dirname(__file__))
 
-from core.db import async_engine
+from app.core.db import async_engine
 from sqlmodel.ext.asyncio.session import AsyncSession
-from services.recipe_sync_service import recipe_sync_service
+from app.services.recipe_sync_service import recipe_sync_service
 
 
 async def sync_recipes_async():
