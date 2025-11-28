@@ -17,9 +17,15 @@ class Settings(BaseSettings):
     DATABASE_HOST: str
     DATABASE_PORT: str
 
+    # AWS
+    AWS_REGION: str = "ap-northeast-2"  # 서울 리전 (기본)
+
     # S3
-    AWS_REGION: str = "us-east-1"
-    S3_BUCKET_NAME: str = "" # CDK에서 생성된 버킷 이름
+    S3_BUCKET_NAME: str = ""  # CDK에서 생성된 버킷 이름
+    S3_RECIPE_PREFIX: str = "recipes"  # 레시피 이미지 저장 경로
+
+    # Amazon Bedrock (Nova Lite)
+    BEDROCK_REGION: str = "ap-northeast-2"  # Amazon Nova Lite 지원 리전 (서울)
 
     # Food Safety Korea API
     FOOD_SAFETY_API_KEY: str = ""

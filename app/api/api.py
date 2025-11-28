@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api import materials
+from app.api import materials, recipes, recommends
 
 api_router = APIRouter()
 

@@ -1,0 +1,12 @@
+# Lambda Recipe Sync Handler Dependencies
+
+# FastAPI & Database (same versions as main app)
+sqlmodel>=0.0.27
+asyncpg>=0.30.0
+greenlet>=3.2.4
+
+# HTTP client for API calls
+httpx>=0.27.0
+
+# AWS SDK
+boto3>=1.34.0

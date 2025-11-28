@@ -18,6 +18,9 @@ engine = create_async_engine(
     connect_args={"ssl": ssl_context} if settings.ENVIRONMENT == "production" else {},
 )
 
+# Lambda에서 사용하는 alias
+async_engine = engine
+
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
     async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     async with async_session() as session:

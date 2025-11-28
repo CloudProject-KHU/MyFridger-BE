@@ -20,6 +20,7 @@ async def test_materials_crud_flow(client: httpx.AsyncClient):
     response = await client.post(
         "/materials/manual",
         json={
+            "user_id": "test_user",
             "name": "Milk",
             "price": 3000,
             "category": "Dairy",
@@ -140,6 +141,7 @@ async def test_cursor_pagination_flow(client: httpx.AsyncClient):
     await client.post(
         "/materials/manual",
         json={
+            "user_id": "test_user",
             "name": "Bread",
             "price": 2000,
             "category": "Bakery",
@@ -151,6 +153,7 @@ async def test_cursor_pagination_flow(client: httpx.AsyncClient):
     await client.post(
         "/materials/manual",
         json={
+            "user_id": "test_user",
             "name": "Butter",
             "price": 5000,
             "category": "Dairy",

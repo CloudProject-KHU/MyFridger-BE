@@ -1,13 +1,15 @@
 import re
 from typing import List, Dict, Optional
+from datetime import datetime
 import httpx
 import json
+import boto3
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from core.config import settings
-from models.recipes import Recipe
-from utils.s3_helper import s3_helper
+from app.core.config import settings
+from app.models.recipes import Recipe
+from app.utils.s3_helper import s3_helper
 
 
 class RecipeSyncService:
@@ -137,32 +139,12 @@ class RecipeSyncService:
                 instructions.append(manual)
         return instructions
     
-    def _extract_image_urls(self, recipe_data: Dict) -> List[str]:
-        """
-        MANUAL_IMG01~MANUAL_IMG20과 ATT_FILE_NO_MAIN, ATT_FILE_NO_MK에서 이미지 URL 추출
-        """
-        image_urls = []
-        
-        # 메인 이미지 먼저 추가 (요리 썸네일)
-        mk_img = recipe_data.get('ATT_FILE_NO_MK', '').strip()
-        if mk_img and mk_img not in image_urls:
-            image_urls.append(mk_img)
-        
-        # 매뉴얼 이미지들 추가
-        for i in range(1, 21):
-            key = f"MANUAL_IMG{i:02d}" if i >= 10 else f"MANUAL_IMG0{i}"
-            img_url = recipe_data.get(key, '').strip()
-            if img_url and img_url not in image_urls:
-                image_urls.append(img_url)
-        
-        return image_urls
-    
     async def fetch_recipes_from_api(
             self,
             start: int = 1,
-            end: int = 999
+            end: int = 999,
             change_date: Optional[str] = None
-    ) -> List[Dict]:
+        ) -> List[Dict]:
         """
         식품의약품안전처 API에서 레시피 데이터 가져오기
         
@@ -209,34 +191,43 @@ class RecipeSyncService:
             result = await session.execute(query)
             existing_recipe = result.scalar_one_or_none()
             
-            # 재료, 조리순서, 이미지 URL 추출
+            # 재료, 조리순서 추출
             material_names = self._parse_materials(recipe_data.get('RCP_PARTS_DTLS', ''))
             instructions = self._extract_instructions(recipe_data)
-            images = self._extract_image_urls(recipe_data)
-            thumbnail_url = images[0]
-            image_urls = images[1:]
-            
-            # 이미지 URL을 S3에 업로드
-            s3_image_urls = []
-            for idx, img_url in enumerate(image_urls):
-                s3_url = await s3_helper.upload_image_from_url(img_url, recipe_id, idx+1) # 1번 idx부터
-                if s3_url:
-                    s3_image_urls.append(s3_url)
+
+            # 썸네일 이미지를 S3에 업로드
+            thumbnail_original_url = recipe_data.get('ATT_FILE_NO_MK', '').strip()
+            thumbnail_s3_url = await s3_helper.upload_thumbnail_from_url(
+                thumbnail_original_url,
+                recipe_id
+            )
+            # S3 업로드 실패 시 원본 URL 사용
+            thumbnail_url = thumbnail_s3_url if thumbnail_s3_url else thumbnail_original_url
+
+            # 조리 과정 이미지를 S3에 업로드 (MANUAL_IMG01~MANUAL_IMG20)
+            manual_image_s3_urls = []
+            for i in range(1, 21):
+                key = f"MANUAL_IMG{i:02d}" if i >= 10 else f"MANUAL_IMG0{i}"
+                img_url = recipe_data.get(key, '').strip()
+                if img_url:
+                    s3_url = await s3_helper.upload_image_from_url(img_url, recipe_id, i)
+                    if s3_url:
+                        manual_image_s3_urls.append(s3_url)
             
             if existing_recipe:
                 # 기존 이미지 삭제 (새 이미지로 교체)
-                if s3_image_urls:  # 새 이미지가 있을 때만 삭제
+                if manual_image_s3_urls:  # 새 이미지가 있을 때만 삭제
                     s3_helper.delete_recipe_images(recipe_id)
-                
+
                 # 업데이트
-                existing_recipe.name = name
+                existing_recipe.recipe_name = name
                 existing_recipe.recipe_pat = recipe_pat
                 existing_recipe.method = method
                 existing_recipe.thumbnail_url = thumbnail_url
                 existing_recipe.instructions = instructions
                 existing_recipe.material_names = material_names
-                existing_recipe.image_url = s3_image_urls
-                
+                existing_recipe.image_url = manual_image_s3_urls
+
                 session.add(existing_recipe)
                 return existing_recipe
             else:
@@ -245,11 +236,11 @@ class RecipeSyncService:
                     recipe_id=recipe_id,
                     recipe_pat=recipe_pat,
                     method=method,
-                    name=name,
+                    recipe_name=name,
                     thumbnail_url=thumbnail_url,
                     instructions=instructions,
                     material_names=material_names,
-                    image_url=s3_image_urls
+                    image_url=manual_image_s3_urls
                 )
                 session.add(new_recipe)
                 return new_recipe

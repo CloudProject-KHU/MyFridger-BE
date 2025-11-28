@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from core.db import get_session
-from models import Recipe, RecipeResponse
+from app.core.db import get_session
+from app.models.recipes import Recipe, RecipeResponse
 
 router = APIRouter()
 
@@ -27,9 +27,9 @@ async def get_recipe_instruction(
         recipe_id=recipe.recipe_id,
         recipe_pat=recipe.recipe_pat,
         method=recipe.method,
-        name=recipe.name,
+        recipe_name=recipe.recipe_name,
+        thumbnail_url=recipe.thumbnail_url,
         instructions=recipe.instructions,
         material_names=recipe.material_names,
         image_url=recipe.image_url,
-        thumbnail_url=recipe.thumbnail_url,
     )
