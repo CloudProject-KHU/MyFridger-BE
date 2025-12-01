@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     DATABASE_HOST: str
     DATABASE_PORT: str
 
+    # API keys
+    OCR_API_KEY: str
+
     @computed_field
     @property
     def DATABASE_URL(self) -> str:

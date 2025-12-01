@@ -1,5 +1,6 @@
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile, File
 from sqlmodel import select, delete
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlalchemy import func
@@ -12,6 +13,8 @@ from app.models import (
     MaterialResponse,
     Pagination,
 )
+from app.core.config import settings
+from app.services.materials import extract_items_from_ocr
 
 router = APIRouter()
 
@@ -60,6 +63,66 @@ async def get_material(
     if not material:
         raise HTTPException(status_code=404, detail="재료를 찾을 수 없습니다.")
     return material
+
+
+@router.post(
+    "/receipt",
+    response_model=List[MaterialResponse],
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_materials_from_receipt(
+    file: UploadFile = File(...),
+    session: AsyncSession = Depends(get_session),
+):
+    content = await file.read()
+
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            "https://api.ocr.space/parse/image",
+            files={"file": (file.filename, content, file.content_type)},
+            data={
+                "apikey": settings.OCR_API_KEY,
+                "language": "kor",
+                "detectOrientation": "true",
+                "isTable": "true",
+                "OCREngine": "2",
+            },
+        )
+
+    result = response.json()
+    data = extract_items_from_ocr(result)
+
+    print("parsed!!!!!!!!!!!!!!")
+    print(result)
+    print(data)
+    print("parsed!!!!!!!!!!!!!!")
+
+    if isinstance(data, str):
+        raise HTTPException(status_code=400, detail=data)
+
+    materials = []
+    for item in data:
+        print(item)
+        material = Material(
+            name=item["name"],
+            price=item["price"],
+            quantity=item["quantity"],
+            currency="KRW",
+            category="기타",
+            purchased_at=func.now(),
+            expired_at=func.now(),
+        )
+        materials.append(material)
+
+    for material in materials:
+        session.add(material)
+
+    if materials:
+        await session.commit()
+        for material in materials:
+            await session.refresh(material)
+
+    return materials
 
 
 @router.post(
