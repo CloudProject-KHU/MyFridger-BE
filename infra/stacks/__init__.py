@@ -1,26 +1,8 @@
-"""
-MyFridger Infrastructure Stacks
-
-스택 목록:
-- CommonStack: 공통 리소스 (VPC, S3, Secrets, CloudWatch)
-- MaterialsStack: 식재료 관리 서비스 (RDS + EC2)
-- RecipeStack: 레시피 추천 서비스 (RDS + Lambda + EventBridge)
-- AlertsStack: 알림 서비스 (RDS + Lambda + SNS/SQS) - TODO
-- UsersStack: 사용자 인증 서비스 (RDS + Cognito) - TODO
-- BackendStack: 기존 통합 백엔드 (레거시, 참고용)
-"""
-from .common_stack import CommonStack
-from .materials_stack import MaterialsStack
-from .recipe_stack import RecipeStack
-from .alerts_stack import AlertsStack
-from .users_stack import UsersStack
 from .backend import BackendStack
+from .recipe_stack import RecipeStack
+
 
 __all__ = [
-    "CommonStack",
-    "MaterialsStack",
-    "RecipeStack",
-    "AlertsStack",
-    "UsersStack",
     "BackendStack",
+    "RecipeStack",
 ]

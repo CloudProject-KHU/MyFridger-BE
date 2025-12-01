@@ -1,12 +1,8 @@
 import aws_cdk as cdk
 
 from stacks import (
-    CommonStack,
-    MaterialsStack,
-    RecipeStack,
-    AlertsStack,
-    UsersStack,
     BackendStack,
+    RecipeStack,
 )
 from utils import Config
 
@@ -25,7 +21,7 @@ recipe_stack = RecipeStack(
     "MyFridger-Recipe",
     vpc=backend_stack.vpc,
     db_instance=backend_stack.db_instance,
-    db_security_group=backend_stack.db_security_group,
+    db_sg=backend_stack.db_sg,
     uploads_bucket=backend_stack.uploads_bucket,
     food_safety_api_secret=backend_stack.food_safety_api_secret,
     recipe_sync_metadata_secret=backend_stack.recipe_sync_metadata_secret,

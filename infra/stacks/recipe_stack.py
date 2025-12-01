@@ -43,7 +43,7 @@ class RecipeStack(Stack):
         construct_id: str,
         vpc: ec2.IVpc,
         db_instance: rds.IDatabaseInstance,
-        db_security_group: ec2.ISecurityGroup,
+        db_sg: ec2.ISecurityGroup,
         uploads_bucket: s3.IBucket,
         food_safety_api_secret: secretsmanager.ISecret,
         recipe_sync_metadata_secret: secretsmanager.ISecret,
@@ -51,12 +51,22 @@ class RecipeStack(Stack):
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
+        # 파라미터 저장
+        self.vpc = vpc
+        self.db_instance = db_instance
+        self.db_sg = db_sg
+        self.uploads_bucket = uploads_bucket
+        self.food_safety_api_secret = food_safety_api_secret
+        self.recipe_sync_metadata_secret = recipe_sync_metadata_secret
+
         is_production = Config.get("Production", False)
         removal_policy = (
             RemovalPolicy.RETAIN if is_production else RemovalPolicy.DESTROY
         )
 
+        # ======================
         # Lambda 보안 그룹
+        # ======================
         self.lambda_sg = ec2.SecurityGroup(
             self,
             "LambdaSecurityGroup",
@@ -64,14 +74,19 @@ class RecipeStack(Stack):
             description="Security group for Lambda functions",
             allow_all_outbound=True,
         )
+        db_sg.add_ingress_rule(
+            peer=self.lambda_sg,
+            connection=ec2.Port.tcp(5432),
+            description="Allow connection from Recipe Lambda"
+        )
 
 
         # ======================
         # Lambda Function - Recipe Sync
         # ======================
 
-        database_name = "myfridger_db"  # 공유 데이터베이스
-        database_username = "myfridger_admin"  # 공유 사용자
+        database_name = "fridger"  # 공유 데이터베이스
+        database_username = "fridger"  # 공유 사용자
 
         # Config에서 Recipe 설정 가져오기
         recipe_config = Config.get("Recipe", {})
@@ -127,53 +142,53 @@ class RecipeStack(Stack):
             ),
             timeout=Duration.minutes(lambda_timeout_minutes),
             memory_size=lambda_memory_size,
-            vpc=vpc,
+            vpc=self.vpc,
             vpc_subnets=ec2.SubnetSelection(
-                subnet_type=ec2.SubnetType.PUBLIC  # Production에서는 ISOLATED로 변경하고, NAT Gateway 추가.
+                subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS  # NAT Gateway 통한 인터넷 접근
             ),
             security_groups=[self.lambda_sg],
             environment={
                 "ENVIRONMENT": "production",
                 "SERVICE_NAME": "recipe",
-                "DATABASE_HOST": db_instance.db_instance_endpoint_address,
+                "DATABASE_HOST": self.db_instance.db_instance_endpoint_address,
                 "DATABASE_PORT": "5432",
                 "DATABASE_NAME": database_name,
                 "DATABASE_USER": database_username,
-                "DB_SECRET_NAME": db_instance.secret.secret_name if db_instance.secret else "",
-                "FOOD_SAFETY_API_SECRET_NAME": food_safety_api_secret.secret_name,
-                "RECIPE_SYNC_METADATA_SECRET_NAME": recipe_sync_metadata_secret.secret_name,
+                "DB_SECRET_NAME": self.db_instance.secret.secret_name if self.db_instance.secret else "",
+                "FOOD_SAFETY_API_SECRET_NAME": self.food_safety_api_secret.secret_name,
+                "RECIPE_SYNC_METADATA_SECRET_NAME": self.recipe_sync_metadata_secret.secret_name,
                 # AWS_REGION은 Lambda 런타임에서 자동으로 설정됨 (예약된 환경 변수)
                 "FOOD_SAFETY_API_BASE_URL": "http://openapi.foodsafetykorea.go.kr/api",
-                "S3_BUCKET_NAME": uploads_bucket.bucket_name,
+                "S3_BUCKET_NAME": self.uploads_bucket.bucket_name,
                 "S3_RECIPE_PREFIX": "recipes",
             },
         )
 
         # Lambda에 권한 부여
-        if db_instance.secret:
-            db_instance.secret.grant_read(self.recipe_sync_lambda)
-        food_safety_api_secret.grant_read(self.recipe_sync_lambda)
-        recipe_sync_metadata_secret.grant_read(self.recipe_sync_lambda)
-        recipe_sync_metadata_secret.grant_write(self.recipe_sync_lambda)
+        if self.db_instance.secret:
+            self.db_instance.secret.grant_read(self.recipe_sync_lambda)
+        self.food_safety_api_secret.grant_read(self.recipe_sync_lambda)
+        self.recipe_sync_metadata_secret.grant_read(self.recipe_sync_lambda)
+        self.recipe_sync_metadata_secret.grant_write(self.recipe_sync_lambda)
 
         # S3 버킷 쓰기 권한 부여
-        uploads_bucket.grant_put(self.recipe_sync_lambda)
-        uploads_bucket.grant_read(self.recipe_sync_lambda)
+        self.uploads_bucket.grant_put(self.recipe_sync_lambda)
+        self.uploads_bucket.grant_read(self.recipe_sync_lambda)
 
         # ======================
         # EventBridge Rule - 매주 월요일 오전 02시 KST
         # ======================
 
-        # KST 02:00 = UTC 17:00 (전날)
-        # 매주 월요일 02:00 KST = 일요일 17:00 UTC
+        # 매월 1일 04:00 KST = 전월 마지막 날 19:00 UTC (전날)
+        # 예: 5월 1일 04:00 KST -> 4월 30일 19:00 UTC
         self.recipe_sync_rule = events.Rule(
             self,
             "RecipeSyncRule",
-            description="Trigger Recipe Sync Lambda every Monday at 02:00 AM KST",
+            description="Trigger Recipe Sync Lambda every 1st day of month at 04:00 AM KST",
             schedule=events.Schedule.cron(
                 minute="0",
-                hour="17",  # UTC 17:00
-                week_day="SUN",  # 일요일 (다음날 월요일 02:00 KST)
+                hour="19",  # UTC 19:00
+                day="L",    # L = Last day of the month (월의 마지막 날)
             ),
         )
 

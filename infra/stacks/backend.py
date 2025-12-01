@@ -61,7 +61,7 @@ class BackendStack(Stack):
             "RecipeSyncMetadataSecret",
             secret_name="fridger/recipe-sync-metadata",
             description="Recipe sync metadata including last sync date",
-            secret_object_value=SecretValue.unsafe_plain_text(
+            secret_string_value=SecretValue.unsafe_plain_text(
                 f'{{"last_sync_date": "{initial_date}"}}'
             )
         )
@@ -73,25 +73,30 @@ class BackendStack(Stack):
         self.vpc = ec2.Vpc(
             self,
             "BackendVpc",
-            ip_addresses=ec2.Ipaddresses.cidr("10.0.0.0/16"),
+            ip_addresses=ec2.IpAddresses.cidr("10.0.0.0/16"),
             max_azs=2,
-            nat_gateways=0,
+            nat_gateways=1,
             subnet_configuration=[
                 ec2.SubnetConfiguration(
                     name="Public", subnet_type=ec2.SubnetType.PUBLIC, cidr_mask=24
                 ),
                 ec2.SubnetConfiguration(
-                    name="Isolated",
-                    subnet_type=ec2.SubnetType.PRIVATE_ISOLATED,
+                    name="Private",
+                    subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS,  # NAT Gateway 사용 (Lambda, S3 용)
                     cidr_mask=24,
                 ),
+                ec2.SubnetConfiguration(
+                    name="Isolated",
+                    subnet_type=ec2.SubnetType.PRIVATE_ISOLATED,  # RDS 용
+                    cidr_mask=24,
+                )
             ],
         )
-        # VPC Endpoint 추가 (Lambda -> S3 접근)
+        # VPC Endpoint 추가 (Lambda -> S3 접근 (인터넷 말고 곧바로 S3로 전달))
         self.vpc.add_gateway_endpoint(
             "S3Endpoint",
             service=ec2.GatewayVpcEndpointAwsService.S3,
-            subnets=[ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_ISOLATED)]
+            subnets=[ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS)]
         )
 
         # ==============================================
@@ -131,25 +136,20 @@ class BackendStack(Stack):
         ec2_sg.add_ingress_rule(ec2.Peer.any_ipv4(), ec2.Port.tcp(443), "allow HTTPS")
 
         # RDS 보안 그룹
-        db_sg = ec2.SecurityGroup(
+        self.db_sg = ec2.SecurityGroup(
             self,
             "DBSecurityGroup",
             vpc=self.vpc,
             description="allow EC2 only",
             allow_all_outbound=False,
         )
-        db_sg.add_ingress_rule(ec2_sg, ec2.Port.tcp(5432), "allow EC2")
-        db_sg.add_ingress_rule(
-            ec2.Peer.ipv4("10.0.0.0/16"),
-            ec2.Port.tcp(5432),
-            "allow Lambda and all VPC resources"
-        )
+        self.db_sg.add_ingress_rule(ec2_sg, ec2.Port.tcp(5432), "allow EC2")
 
 
         # ==============================================
         # RDS, EC2 Instance
         # ==============================================
-        # DB 인스턴스
+        # DB 인스턴스 (RDS)
         database_name = "fridger"
         database_username = "fridger"
         credentials = rds.Credentials.from_generated_secret(
@@ -170,7 +170,7 @@ class BackendStack(Stack):
                 ec2.InstanceClass.BURSTABLE3,
                 ec2.InstanceSize.MICRO,
             ),
-            security_groups=[db_sg],
+            security_groups=[self.db_sg],
             database_name=database_name,
             credentials=credentials,
             backup_retention=Duration.days(0),
