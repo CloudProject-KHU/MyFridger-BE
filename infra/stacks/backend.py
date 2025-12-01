@@ -8,12 +8,14 @@ from aws_cdk import (
     SecretValue,
     aws_ec2 as ec2,
     aws_rds as rds,
+    aws_s3 as s3,
     aws_s3_assets as s3_assets,
     aws_secretsmanager as secretsmanager,
     aws_lambda as lambda_,
     aws_events as events,
     aws_events_targets as targets,
     aws_iam as iam,
+    CfnOutput,
 )
 from constructs import Construct
 
@@ -37,6 +39,9 @@ class BackendStack(Stack):
             RemovalPolicy.RETAIN if is_production else RemovalPolicy.DESTROY
         )
 
+        # ==============================================
+        # Secret Manager
+        # ==============================================
         # Food Safety API Key를 Secret Manager에 저장
         self.food_safety_api_secret = secretsmanager.Secret(
             self,
@@ -50,7 +55,6 @@ class BackendStack(Stack):
 
         # Recipe Sync Metadata를 Secret Manager에 저장
         # 초기값은 20000101로 설정
-        from datetime import datetime
         initial_date = "20000101"
         self.recipe_sync_metadata_secret = secretsmanager.Secret(
             self,
@@ -62,10 +66,14 @@ class BackendStack(Stack):
             )
         )
 
+        # ==============================================
+        # VPC
+        # ==============================================
         # VPC 설정
         self.vpc = ec2.Vpc(
             self,
             "BackendVpc",
+            ip_addresses=ec2.Ipaddresses.cidr("10.0.0.0/16"),
             max_azs=2,
             nat_gateways=0,
             subnet_configuration=[
@@ -79,7 +87,37 @@ class BackendStack(Stack):
                 ),
             ],
         )
+        # VPC Endpoint 추가 (Lambda -> S3 접근)
+        self.vpc.add_gateway_endpoint(
+            "S3Endpoint",
+            service=ec2.GatewayVpcEndpointAwsService.S3,
+            subnets=[ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_ISOLATED)]
+        )
 
+        # ==============================================
+        # Session Manager
+        # ==============================================
+        # Session Manager를 위한 VPC Interface Endpoints 추가 (프리티어)
+        # Public Subnet에 배치하여 EC2 인스턴스가 접근 가능하도록 설정
+        self.vpc.add_interface_endpoint(
+           "SSMEndpoint",
+           service=ec2.InterfaceVpcEndpointAwsService.SSM,
+           subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PUBLIC),
+        )
+        self.vpc.add_interface_endpoint(
+            "SSMMessagesEndpoint",
+            service=ec2.InterfaceVpcEndpointAwsService.SSM_MESSAGES,
+            subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PUBLIC),
+        )
+        self.vpc.add_interface_endpoint(
+            "EC2MessagesEndpoint",
+            service=ec2.InterfaceVpcEndpointAwsService.EC2_MESSAGES,
+            subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PUBLIC),
+        )
+
+        # ==============================================
+        # Security Group
+        # ==============================================
         # EC2 보안 그룹
         ec2_sg = ec2.SecurityGroup(
             self,
@@ -101,7 +139,16 @@ class BackendStack(Stack):
             allow_all_outbound=False,
         )
         db_sg.add_ingress_rule(ec2_sg, ec2.Port.tcp(5432), "allow EC2")
+        db_sg.add_ingress_rule(
+            ec2.Peer.ipv4("10.0.0.0/16"),
+            ec2.Port.tcp(5432),
+            "allow Lambda and all VPC resources"
+        )
 
+
+        # ==============================================
+        # RDS, EC2 Instance
+        # ==============================================
         # DB 인스턴스
         database_name = "fridger"
         database_username = "fridger"
@@ -152,6 +199,7 @@ class BackendStack(Stack):
                 ".env",
                 "tests",
                 "infra",
+                "lambda",
             ],
         )
         key_pair = ec2.CfnKeyPair(
@@ -215,8 +263,66 @@ class BackendStack(Stack):
         )
         self.ec2_instance.add_user_data(commands.render())
 
-        self.eip = ec2.CfnEIP(
+
+        # ==============================================
+        #  EIP attach
+        # ==============================================
+        # 새로운 EIP 생성하여 EC2에 연결하는 방식
+        # self.eip = ec2.CfnEIP(
+        #     self,
+        #     "BackendEIP",
+        #     instance_id=self.ec2_instance.instance_id
+        # )
+
+        # Config에서 기존 EIP 정보 가져오기
+        materials_config = Config.get("Materials", {})
+        existing_eip_allocation_id = materials_config.get("eip_allocation_id")
+        existing_eip_address = materials_config.get("eip_address")
+
+        if not existing_eip_allocation_id or not existing_eip_address:
+            raise ValueError(
+                "Materials EIP configuration is missing. "
+                "Please set 'Materials.eip_allocation_id' and 'Materials.eip_address' in infra/utils.py"
+            )
+
+        # 기존 EIP를 새 EC2 인스턴스에 연결
+        self.eip_association = ec2.CfnEIPAssociation(
             self,
-            "BackendEIP",
-            instance_id=self.ec2_instance.instance_id
+            "MaterialsEIPAssociation",
+            allocation_id=existing_eip_allocation_id,
+            instance_id=self.ec2_instance.instance_id,
+        )
+
+        # ==============================================
+        #  S3 Instance
+        # ==============================================
+        # S3 버킷 - 이미지 업로드
+        self.uploads_bucket = s3.Bucket(
+            self,
+            "UploadsBucket",
+            bucket_name=f"myfridger-uploads-{self.account}-{self.region}",
+            removal_policy=removal_policy,
+            auto_delete_objects=not is_production,
+            versioned=is_production,
+            encryption=s3.BucketEncryption.S3_MANAGED,
+            cors=[
+                s3.CorsRule(
+                    allowed_methods=[
+                        s3.HttpMethods.GET,
+                        s3.HttpMethods.PUT,
+                        s3.HttpMethods.POST,
+                    ],
+                    allowed_origins=["*"],  # 프로덕션에서는 특정 도메인으로 제한
+                    allowed_headers=["*"],
+                )
+            ],
+        )
+        self.uploads_bucket.grant_read(self.ec2_instance.role)
+
+
+        CfnOutput(
+            self,
+            "VpcId",
+            value=self.vpc.vpc_id,
+            export_name="BackendVpc",
         )

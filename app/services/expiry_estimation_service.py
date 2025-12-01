@@ -1,9 +1,12 @@
 from datetime import datetime, timedelta
 from typing import Dict, Optional
 import json
+import boto3
+from fastapi import Depends
 
 from app.core.config import settings
 from app.models.recipes import ExpiryEstimationRequest, ExpiryEstimationResponse
+from app.utils.bedrock_dependencies import get_bedrock_client
 
 
 # 카테고리별 기본 소비기한 규칙 (일 단위)
@@ -51,26 +54,24 @@ EXPIRY_RULES: Dict[str, Dict] = {
 }
 
 
-
 class ExpiryEstimationService:
     """소비기한 추정 서비스"""
 
-    def __init__(self):
-        self._bedrock_client = None
+    def __init__(self, bedrock_client): # Amazon Bedrock 클라이언트 생성을 싱글톤으로 early loading.
+        self._bedrock_client = bedrock_client
 
-    def _get_bedrock_client(self):
-        """Amazon Bedrock 클라이언트 생성 (lazy loading)"""
-        if self._bedrock_client is None:
-            try:
-                import boto3
-                self._bedrock_client = boto3.client(
-                    'bedrock-runtime',
-                    region_name=settings.BEDROCK_REGION  # Amazon Bedrock (Nova Lite) 지원 리전 사용
-                )
-            except Exception as e:
-                print(f"Failed to create Bedrock client: {str(e)}")
-                self._bedrock_client = None
-        return self._bedrock_client
+    # def _get_bedrock_client(self):
+    #     """Amazon Bedrock 클라이언트 생성 (lazy loading)"""
+    #     if self._bedrock_client is None:
+    #         try:
+    #             self._bedrock_client = boto3.client(
+    #                 'bedrock-runtime',
+    #                 region_name=settings.BEDROCK_REGION  # Amazon Bedrock (Nova Lite) 지원 리전 사용
+    #             )
+    #         except Exception as e:
+    #             print(f"Failed to create Bedrock client: {str(e)}")
+    #             self._bedrock_client = None
+    #     return self._bedrock_client
 
     def estimate_expiry_rule_based(
         self,
@@ -124,9 +125,8 @@ class ExpiryEstimationService:
         Option B: Amazon Bedrock (Nova Lite) 기반 추정
         AI를 활용한 더 정교한 소비기한 추정
         """
-        client = self._get_bedrock_client()
 
-        if not client:
+        if not self._bedrock_client:
             # Bedrock 사용 불가 시 규칙 기반으로 폴백
             return self.estimate_expiry_rule_based(request)
 
@@ -316,7 +316,7 @@ class ExpiryEstimationService:
 """
 
             # Bedrock API 호출 (Amazon Nova Lite 형식)
-            response = client.invoke_model(
+            response = self._bedrock_client.invoke_model(
                 modelId="amazon.nova-lite-v1:0",
                 body=json.dumps({
                     "messages": [
@@ -382,11 +382,11 @@ class ExpiryEstimationService:
             추정된 소비기한 정보
         """
         # 개발 환경에서는 규칙 기반만 사용
-        if settings.ENVIRONMENT == "development" or not use_ai:
+        if not use_ai: # or settings.ENVIRONMENT == "development":
             return self.estimate_expiry_rule_based(request)
 
         # 프로덕션에서는 AI 사용 (실패 시 규칙 기반 폴백)
         return await self.estimate_expiry_ai_based(request)
 
 
-expiry_estimation_service = ExpiryEstimationService()
+# expiry_estimation_service = ExpiryEstimationService()

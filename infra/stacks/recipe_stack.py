@@ -1,13 +1,3 @@
-"""
-Recipe Stack - 레시피 추천 서비스
-
-Recipe Sync Lambda:
-- Lambda Function (Recipe Sync)
-- EventBridge (매주 월요일 오전 02시 KST)
-- Security Groups
-- S3 (레시피 이미지 저장)
-- CommonStack의 공유 RDS 사용
-"""
 from aws_cdk import (
     Stack,
     Duration,
@@ -18,6 +8,8 @@ from aws_cdk import (
     aws_events as events,
     aws_events_targets as targets,
     aws_secretsmanager as secretsmanager,
+    RemovalPolicy,
+    CfnOutput,
 )
 from constructs import Construct
 from utils import Config
@@ -28,7 +20,7 @@ class RecipeStack(Stack):
     레시피 추천 서비스 스택
 
     Dependencies:
-    - CommonStack (VPC, 공유 RDS, Secrets)
+    - BackendStack (VPC, 공유 RDS, 공유 S3 버킷, Secrets)
 
     Resources:
     - Lambda Function (Recipe Sync from 식품안전나라 API)
@@ -36,8 +28,8 @@ class RecipeStack(Stack):
     - Security Groups
 
     Database:
-    - CommonStack의 공유 RDS 인스턴스 사용
-    - Database: myfridger_db
+    - BackendStack의 공유 RDS 인스턴스 사용
+    - Database: fridger
     - Tables: recipe, recipe_recommendations
 
     S3 Storage:
@@ -59,25 +51,20 @@ class RecipeStack(Stack):
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
-        # ======================
-        # Security Groups
-        # ======================
+        is_production = Config.get("Production", False)
+        removal_policy = (
+            RemovalPolicy.RETAIN if is_production else RemovalPolicy.DESTROY
+        )
 
         # Lambda 보안 그룹
         self.lambda_sg = ec2.SecurityGroup(
             self,
-            "RecipeLambdaSG",
-            vpc=vpc,
-            description="Security group for Recipe Sync Lambda",
+            "LambdaSecurityGroup",
+            vpc=self.vpc,
+            description="Security group for Lambda functions",
             allow_all_outbound=True,
         )
 
-        # 공유 RDS 보안 그룹에 Lambda 접근 허용
-        db_security_group.add_ingress_rule(
-            self.lambda_sg,
-            ec2.Port.tcp(5432),
-            "Allow Recipe Lambda to access Shared DB"
-        )
 
         # ======================
         # Lambda Function - Recipe Sync
@@ -86,15 +73,39 @@ class RecipeStack(Stack):
         database_name = "myfridger_db"  # 공유 데이터베이스
         database_username = "myfridger_admin"  # 공유 사용자
 
+        # Config에서 Recipe 설정 가져오기
+        recipe_config = Config.get("Recipe", {})
+        lambda_timeout_minutes = recipe_config.get("timeout_minutes", 15)
+        lambda_memory_size = recipe_config.get("memory_size", 1024)
+
         # Lambda 함수 생성
+        #
+        # NOTE: 프로덕션 배포 시에는 bundling을 활성화해야 합니다!
+        # Docker Desktop 설치 후 주석 해제
+        #
+        import os
+        skip_bundling = os.environ.get("CDK_SKIP_BUNDLING", "false").lower() == "true"
+
         self.recipe_sync_lambda = lambda_.Function(
             self,
             "RecipeSyncLambda",
             runtime=lambda_.Runtime.PYTHON_3_12,
             handler="recipe_sync_handler.lambda_handler",
             code=lambda_.Code.from_asset(
-                "lambda",
-                bundling={
+                ".",  # 전체 프로젝트 디렉토리 마운트
+                exclude=[
+                    "cdk.out",
+                    ".git",
+                    ".gitignore",
+                    "*.md",
+                    "**/__pycache__",
+                    "venv",
+                    ".venv",
+                    ".env",
+                    "tests",
+                    "infra",
+                ],
+                bundling=None if skip_bundling else {
                     "image": lambda_.Runtime.PYTHON_3_12.bundling_image,
                     "command": [
                         "bash", "-c",
@@ -108,17 +119,17 @@ class RecipeStack(Stack):
                         #   │   ├── services/
                         #   │   └── utils/
                         #   └── [installed dependencies from requirements.txt]
-                        "pip install -r requirements.txt -t /asset-output && "
-                        "cp -r . /asset-output && "
-                        "cp -r ../app /asset-output/app"
+                        "pip install -r lambda/requirements.txt -t /asset-output && "
+                        "cp -r lambda/* /asset-output/ && "
+                        "cp -r app /asset-output/app"
                     ],
                 }
             ),
-            timeout=Duration.minutes(15),  # 레시피 동기화는 시간이 걸릴 수 있음
-            memory_size=1024,
+            timeout=Duration.minutes(lambda_timeout_minutes),
+            memory_size=lambda_memory_size,
             vpc=vpc,
             vpc_subnets=ec2.SubnetSelection(
-                subnet_type=ec2.SubnetType.PRIVATE_ISOLATED
+                subnet_type=ec2.SubnetType.PUBLIC  # Production에서는 ISOLATED로 변경하고, NAT Gateway 추가.
             ),
             security_groups=[self.lambda_sg],
             environment={
@@ -131,7 +142,7 @@ class RecipeStack(Stack):
                 "DB_SECRET_NAME": db_instance.secret.secret_name if db_instance.secret else "",
                 "FOOD_SAFETY_API_SECRET_NAME": food_safety_api_secret.secret_name,
                 "RECIPE_SYNC_METADATA_SECRET_NAME": recipe_sync_metadata_secret.secret_name,
-                "AWS_REGION": self.region,
+                # AWS_REGION은 Lambda 런타임에서 자동으로 설정됨 (예약된 환경 변수)
                 "FOOD_SAFETY_API_BASE_URL": "http://openapi.foodsafetykorea.go.kr/api",
                 "S3_BUCKET_NAME": uploads_bucket.bucket_name,
                 "S3_RECIPE_PREFIX": "recipes",
@@ -171,11 +182,8 @@ class RecipeStack(Stack):
             targets.LambdaFunction(self.recipe_sync_lambda)
         )
 
-        # ======================
-        # Outputs
-        # ======================
-        from aws_cdk import CfnOutput
 
+        # Outputs
         CfnOutput(
             self,
             "RecipeSyncLambdaArn",

@@ -13,9 +13,10 @@ from app.models.recipes import (
     RecipeRecommendation
 )
 from app.services import (
-    recipe_recommendation_service,
-    expiry_estimation_service
+    recipe_recommendation_service
 )
+from app.services.expiry_estimation_service import ExpiryEstimationService
+from app.utils.bedrock_dependencies import get_expiry_service
 
 
 router = APIRouter()
@@ -126,7 +127,8 @@ async def create_recipe_feedback(
 @router.post("/expire", response_model=ExpiryEstimationResponse)
 async def estimate_expiry_date(
     request: ExpiryEstimationRequest,
-    use_ai: bool = True
+    use_ai: bool = True,
+    service: ExpiryEstimationService = Depends(get_expiry_service)
 ):
     """
     AI 기반 소비기한 추정
@@ -159,7 +161,7 @@ async def estimate_expiry_date(
     - notes: 추정 근거 및 보관 팁
     """
     try:
-        result = await expiry_estimation_service.estimate_expiry(
+        result = await service.estimate_expiry(
             request=request,
             use_ai=use_ai
         )
