@@ -145,6 +145,20 @@ class BackendStack(Stack):
         )
         self.db_sg.add_ingress_rule(ec2_sg, ec2.Port.tcp(5432), "allow EC2")
 
+        # Lambda 보안 그룹
+        self.lambda_sg = ec2.SecurityGroup(
+            self,
+            "LambdaSecurityGroup",
+            vpc=self.vpc,
+            description="Security group for Lambda functions",
+            allow_all_outbound=True,
+        )
+        self.db_sg.add_ingress_rule(
+            peer=self.lambda_sg,
+            connection=ec2.Port.tcp(5432),
+            description="Allow connection from Recipe Lambda"
+        )
+
 
         # ==============================================
         # RDS, EC2 Instance

@@ -21,7 +21,7 @@ recipe_stack = RecipeStack(
     "MyFridger-Recipe",
     vpc=backend_stack.vpc,
     db_instance=backend_stack.db_instance,
-    db_sg=backend_stack.db_sg,
+    lambda_sg=backend_stack.lambda_sg,
     uploads_bucket=backend_stack.uploads_bucket,
     food_safety_api_secret=backend_stack.food_safety_api_secret,
     recipe_sync_metadata_secret=backend_stack.recipe_sync_metadata_secret,

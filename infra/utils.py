@@ -8,8 +8,8 @@ Config = {
   # Materials 서비스 설정
   "Materials": {
     # 기존 EIP 정보 (새 EC2 인스턴스에 연결)
-    "eip_allocation_id": "eipalloc-030258a8cefacdd5e",
-    "eip_address": "52.78.138.82"
+    "eip_allocation_id": "eipalloc-01fa3c0482ab22407",
+    "eip_address": "13.124.139.199"
   },
 
   # Recipe 서비스 설정

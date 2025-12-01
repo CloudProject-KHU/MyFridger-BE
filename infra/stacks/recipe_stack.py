@@ -43,7 +43,7 @@ class RecipeStack(Stack):
         construct_id: str,
         vpc: ec2.IVpc,
         db_instance: rds.IDatabaseInstance,
-        db_sg: ec2.ISecurityGroup,
+        lambda_sg: ec2.ISecurityGroup,
         uploads_bucket: s3.IBucket,
         food_safety_api_secret: secretsmanager.ISecret,
         recipe_sync_metadata_secret: secretsmanager.ISecret,
@@ -54,7 +54,7 @@ class RecipeStack(Stack):
         # 파라미터 저장
         self.vpc = vpc
         self.db_instance = db_instance
-        self.db_sg = db_sg
+        self.lambda_sg = lambda_sg
         self.uploads_bucket = uploads_bucket
         self.food_safety_api_secret = food_safety_api_secret
         self.recipe_sync_metadata_secret = recipe_sync_metadata_secret
@@ -62,22 +62,6 @@ class RecipeStack(Stack):
         is_production = Config.get("Production", False)
         removal_policy = (
             RemovalPolicy.RETAIN if is_production else RemovalPolicy.DESTROY
-        )
-
-        # ======================
-        # Lambda 보안 그룹
-        # ======================
-        self.lambda_sg = ec2.SecurityGroup(
-            self,
-            "LambdaSecurityGroup",
-            vpc=self.vpc,
-            description="Security group for Lambda functions",
-            allow_all_outbound=True,
-        )
-        db_sg.add_ingress_rule(
-            peer=self.lambda_sg,
-            connection=ec2.Port.tcp(5432),
-            description="Allow connection from Recipe Lambda"
         )
 
 

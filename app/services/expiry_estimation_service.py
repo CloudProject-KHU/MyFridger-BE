@@ -2,11 +2,9 @@ from datetime import datetime, timedelta
 from typing import Dict, Optional
 import json
 import boto3
-from fastapi import Depends
 
 from app.core.config import settings
 from app.models.recipes import ExpiryEstimationRequest, ExpiryEstimationResponse
-from app.utils.bedrock_dependencies import get_bedrock_client
 
 
 # 카테고리별 기본 소비기한 규칙 (일 단위)
