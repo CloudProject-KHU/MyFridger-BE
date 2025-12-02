@@ -32,7 +32,7 @@ class S3Helper:
 
         try:
             # 이미지 다운로드
-            async with httpx.AsyncClient(timeout=120.0) as client:
+            async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
                 response = await client.get(image_url)
                 response.raise_for_status()
                 image_data = response.content
@@ -94,7 +94,7 @@ class S3Helper:
 
         try:
             # 이미지 다운로드
-            async with httpx.AsyncClient(timeout=120.0) as client:
+            async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
                 response = await client.get(image_url)
                 response.raise_for_status()
                 image_data = response.content
