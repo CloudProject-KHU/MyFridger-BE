@@ -30,10 +30,6 @@ class Recipe(RecipeBase, table=True):
     image_url: List[str] = Field(
         sa_column=Column(ARRAY(String)), default_factory=list
     )
-    cached_at: datetime = Field(
-        default_factory=datetime.utcnow,
-        sa_column=Column(DateTime(timezone=True))
-    )
 
 
 class RecipeCreate(SQLModel):
@@ -51,7 +47,6 @@ class RecipeResponse(RecipeBase):
     instructions: List[str]
     material_names: List[str]
     image_url: List[str]
-    cached_at: datetime
 
 
 class RecipeRecommendationBase(SQLModel):

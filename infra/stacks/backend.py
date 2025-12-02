@@ -240,6 +240,11 @@ class BackendStack(Stack):
         app_asset.grant_read(self.ec2_instance.role)
         self.db_instance.secret.grant_read(self.ec2_instance.role)
 
+        # Bedrock 권한 추가 (AI 기반 소비기한 추정)
+        self.ec2_instance.role.add_managed_policy(
+            iam.ManagedPolicy.from_aws_managed_policy_name("AmazonBedrockFullAccess")
+        )
+
         environment_variables = {
             "ENVIRONMENT": "production",
             "DATABASE_HOST": self.db_instance.db_instance_endpoint_address,
@@ -319,6 +324,14 @@ class BackendStack(Stack):
             auto_delete_objects=not is_production,
             versioned=is_production,
             encryption=s3.BucketEncryption.S3_MANAGED,
+            # Public Read 접근 허용 (레시피 이미지를 인터넷 사용자가 볼 수 있도록)
+            public_read_access=True,
+            block_public_access=s3.BlockPublicAccess(
+                block_public_acls=False,
+                block_public_policy=False,
+                ignore_public_acls=False,
+                restrict_public_buckets=False
+            ),
             cors=[
                 s3.CorsRule(
                     allowed_methods=[
