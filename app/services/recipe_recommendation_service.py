@@ -67,10 +67,17 @@ class RecipeRecommendationService:
             - missing_materials: 부족한 재료 목록
             - high_priority_materials: HIGH priority 재료 목록
         """
-        # 1. 재료 일치율 계산
+        # 1. 재료 일치율 계산 (부분 문자열 매칭)
         recipe_ingredients = set(m.lower() for m in recipe.material_names)
         user_ingredient_names = set(m.name.lower() for m in user_materials)
-        matched = recipe_ingredients & user_ingredient_names
+
+        # 부분 문자열 매칭: 사용자 재료가 레시피 재료에 포함되어 있는지 확인
+        matched = set()
+        for user_ingredient in user_ingredient_names:
+            for recipe_ingredient in recipe_ingredients:
+                if user_ingredient in recipe_ingredient:
+                    matched.add(user_ingredient)
+                    break
 
         if not recipe_ingredients:
             base_match_ratio = 0.0

@@ -32,7 +32,7 @@ class S3Helper:
 
         try:
             # 이미지 다운로드
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=120.0) as client:
                 response = await client.get(image_url)
                 response.raise_for_status()
                 image_data = response.content
@@ -54,13 +54,14 @@ class S3Helper:
             }
             content_type = content_type_map.get(extension, 'image/jpeg')
 
-            # S3에 업로드
+            # S3에 업로드 (Public Read 허용)
             self.s3_client.put_object(
                 Bucket=self.bucket_name,
                 Key=s3_key,
                 Body=image_data,
                 ContentType=content_type,
-                CacheControl='max-age=31536000'  # 1년 캐싱
+                CacheControl='max-age=31536000',  # 1년 캐싱
+                ACL='public-read'  # 인터넷 사용자가 이미지 조회 가능
             )
 
             # S3 URL 반환
@@ -93,7 +94,7 @@ class S3Helper:
 
         try:
             # 이미지 다운로드
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=120.0) as client:
                 response = await client.get(image_url)
                 response.raise_for_status()
                 image_data = response.content
@@ -115,13 +116,14 @@ class S3Helper:
             }
             content_type = content_type_map.get(extension, 'image/jpeg')
 
-            # S3에 업로드
+            # S3에 업로드 (Public Read 허용)
             self.s3_client.put_object(
                 Bucket=self.bucket_name,
                 Key=s3_key,
                 Body=image_data,
                 ContentType=content_type,
-                CacheControl='max-age=31536000'  # 1년 캐싱
+                CacheControl='max-age=31536000',  # 1년 캐싱
+                ACL='public-read'  # 인터넷 사용자가 이미지 조회 가능
             )
 
             # S3 URL 반환

@@ -15,7 +15,6 @@ from app.models.recipes import (
 from app.services import (
     recipe_recommendation_service
 )
-from app.services.expiry_estimation_service import ExpiryEstimationService
 from app.utils.bedrock_dependencies import get_expiry_service
 
 
@@ -128,7 +127,7 @@ async def create_recipe_feedback(
 async def estimate_expiry_date(
     request: ExpiryEstimationRequest,
     use_ai: bool = True,
-    service: ExpiryEstimationService = Depends(get_expiry_service)
+    service = Depends(get_expiry_service)  # 타입 힌트 제거 (circular import 방지)
 ):
     """
     AI 기반 소비기한 추정
