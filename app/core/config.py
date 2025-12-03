@@ -28,7 +28,8 @@ class Settings(BaseSettings):
     # Amazon Bedrock (Nova Lite)
     BEDROCK_REGION: str = "ap-northeast-2"  # Amazon Nova Lite 지원 리전 (서울)
 
-    # Food Safety Korea API
+    # API keys
+    OCR_API_KEY: str
     FOOD_SAFETY_API_KEY: str = ""
     FOOD_SAFETY_API_BASE_URL: str = "http://openapi.foodsafetykorea.go.kr/api"
 
