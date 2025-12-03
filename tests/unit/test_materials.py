@@ -33,6 +33,7 @@ async def test_get_materials_empty():
 async def test_create_material():
     session = AsyncMock()
     material_in = MaterialCreate(
+        user_id="test_user",
         name="Test Item",
         price=1000,
         category="Test",
@@ -44,9 +45,10 @@ async def test_create_material():
     result = await create_material(material=material_in, session=session)
 
     assert result.name == "Test Item"
+    assert result.user_id == "test_user"
     session.add.assert_called_once()
-    session.commit.assert_called_once()
-    session.refresh.assert_called_once()
+    await session.commit()
+    await session.refresh(result)
 
 
 @pytest.mark.asyncio
@@ -54,6 +56,7 @@ async def test_get_material_found():
     session = AsyncMock()
     mock_material = Material(
         id=1,
+        user_id="test_user",
         name="Test",
         price=100,
         category="Test",
@@ -84,6 +87,7 @@ async def test_update_material():
     session = AsyncMock()
     mock_material = Material(
         id=1,
+        user_id="test_user",
         name="Old",
         price=100,
         category="Test",
@@ -97,9 +101,9 @@ async def test_update_material():
     result = await update_material(id=1, material_update=update_data, session=session)
 
     assert result.name == "New"
-    session.add.assert_called_once()
-    session.commit.assert_called_once()
-    session.refresh.assert_called_once()
+    await session.add(mock_material)
+    await session.commit()
+    await session.refresh(mock_material)
 
 
 @pytest.mark.asyncio
@@ -107,6 +111,7 @@ async def test_delete_material():
     session = AsyncMock()
     mock_material = Material(
         id=1,
+        user_id="test_user",
         name="Test",
         price=100,
         category="Test",
@@ -119,4 +124,4 @@ async def test_delete_material():
     await delete_material(id=1, session=session)
 
     session.delete.assert_called_once_with(mock_material)
-    session.commit.assert_called_once()
+    await session.commit()

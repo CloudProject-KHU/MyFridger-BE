@@ -5,9 +5,17 @@ from aws_cdk import (
     Duration,
     RemovalPolicy,
     Stack,
+    SecretValue,
     aws_ec2 as ec2,
     aws_rds as rds,
+    aws_s3 as s3,
     aws_s3_assets as s3_assets,
+    aws_secretsmanager as secretsmanager,
+    aws_lambda as lambda_,
+    aws_events as events,
+    aws_events_targets as targets,
+    aws_iam as iam,
+    CfnOutput,
 )
 from constructs import Construct
 
@@ -31,24 +39,90 @@ class BackendStack(Stack):
             RemovalPolicy.RETAIN if is_production else RemovalPolicy.DESTROY
         )
 
+        # ==============================================
+        # Secret Manager
+        # ==============================================
+        # Food Safety API Key를 Secret Manager에 저장
+        self.food_safety_api_secret = secretsmanager.Secret(
+            self,
+            "FoodSafetyAPISecret",
+            secret_name="fridger/food-safety-api-key",
+            description="Food Safety Korea API Key",
+            secret_string_value=SecretValue.unsafe_plain_text(
+                '{"api_key": "YOUR_API_KEY_HERE"}'  # 배포 후 콘솔에서 변경
+            )
+        )
+
+        # Recipe Sync Metadata를 Secret Manager에 저장
+        # 초기값은 20000101로 설정
+        initial_date = "20000101"
+        self.recipe_sync_metadata_secret = secretsmanager.Secret(
+            self,
+            "RecipeSyncMetadataSecret",
+            secret_name="fridger/recipe-sync-metadata",
+            description="Recipe sync metadata including last sync date",
+            secret_string_value=SecretValue.unsafe_plain_text(
+                f'{{"last_sync_date": "{initial_date}"}}'
+            )
+        )
+
+        # ==============================================
+        # VPC
+        # ==============================================
         # VPC 설정
         self.vpc = ec2.Vpc(
             self,
             "BackendVpc",
+            ip_addresses=ec2.IpAddresses.cidr("10.0.0.0/16"),
             max_azs=2,
-            nat_gateways=0,
+            nat_gateways=1,
             subnet_configuration=[
                 ec2.SubnetConfiguration(
                     name="Public", subnet_type=ec2.SubnetType.PUBLIC, cidr_mask=24
                 ),
                 ec2.SubnetConfiguration(
-                    name="Isolated",
-                    subnet_type=ec2.SubnetType.PRIVATE_ISOLATED,
+                    name="Private",
+                    subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS,  # NAT Gateway 사용 (Lambda, S3 용)
                     cidr_mask=24,
                 ),
+                ec2.SubnetConfiguration(
+                    name="Isolated",
+                    subnet_type=ec2.SubnetType.PRIVATE_ISOLATED,  # RDS 용
+                    cidr_mask=24,
+                )
             ],
         )
+        # VPC Endpoint 추가 (Lambda -> S3 접근 (인터넷 말고 곧바로 S3로 전달))
+        self.vpc.add_gateway_endpoint(
+            "S3Endpoint",
+            service=ec2.GatewayVpcEndpointAwsService.S3,
+            subnets=[ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS)]
+        )
 
+        # ==============================================
+        # Session Manager
+        # ==============================================
+        # Session Manager를 위한 VPC Interface Endpoints 추가 (프리티어)
+        # Public Subnet에 배치하여 EC2 인스턴스가 접근 가능하도록 설정
+        self.vpc.add_interface_endpoint(
+           "SSMEndpoint",
+           service=ec2.InterfaceVpcEndpointAwsService.SSM,
+           subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PUBLIC),
+        )
+        self.vpc.add_interface_endpoint(
+            "SSMMessagesEndpoint",
+            service=ec2.InterfaceVpcEndpointAwsService.SSM_MESSAGES,
+            subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PUBLIC),
+        )
+        self.vpc.add_interface_endpoint(
+            "EC2MessagesEndpoint",
+            service=ec2.InterfaceVpcEndpointAwsService.EC2_MESSAGES,
+            subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PUBLIC),
+        )
+
+        # ==============================================
+        # Security Group
+        # ==============================================
         # EC2 보안 그룹
         ec2_sg = ec2.SecurityGroup(
             self,
@@ -62,16 +136,34 @@ class BackendStack(Stack):
         ec2_sg.add_ingress_rule(ec2.Peer.any_ipv4(), ec2.Port.tcp(443), "allow HTTPS")
 
         # RDS 보안 그룹
-        db_sg = ec2.SecurityGroup(
+        self.db_sg = ec2.SecurityGroup(
             self,
             "DBSecurityGroup",
             vpc=self.vpc,
             description="allow EC2 only",
             allow_all_outbound=False,
         )
-        db_sg.add_ingress_rule(ec2_sg, ec2.Port.tcp(5432), "allow EC2")
+        self.db_sg.add_ingress_rule(ec2_sg, ec2.Port.tcp(5432), "allow EC2")
 
-        # DB 인스턴스
+        # Lambda 보안 그룹
+        self.lambda_sg = ec2.SecurityGroup(
+            self,
+            "LambdaSecurityGroup",
+            vpc=self.vpc,
+            description="Security group for Lambda functions",
+            allow_all_outbound=True,
+        )
+        self.db_sg.add_ingress_rule(
+            peer=self.lambda_sg,
+            connection=ec2.Port.tcp(5432),
+            description="Allow connection from Recipe Lambda"
+        )
+
+
+        # ==============================================
+        # RDS, EC2 Instance
+        # ==============================================
+        # DB 인스턴스 (RDS)
         database_name = "fridger"
         database_username = "fridger"
         credentials = rds.Credentials.from_generated_secret(
@@ -92,7 +184,7 @@ class BackendStack(Stack):
                 ec2.InstanceClass.BURSTABLE3,
                 ec2.InstanceSize.MICRO,
             ),
-            security_groups=[db_sg],
+            security_groups=[self.db_sg],
             database_name=database_name,
             credentials=credentials,
             backup_retention=Duration.days(0),
@@ -121,6 +213,7 @@ class BackendStack(Stack):
                 ".env",
                 "tests",
                 "infra",
+                "lambda",
             ],
         )
         key_pair = ec2.CfnKeyPair(
@@ -146,6 +239,11 @@ class BackendStack(Stack):
 
         app_asset.grant_read(self.ec2_instance.role)
         self.db_instance.secret.grant_read(self.ec2_instance.role)
+
+        # Bedrock 권한 추가 (AI 기반 소비기한 추정)
+        self.ec2_instance.role.add_managed_policy(
+            iam.ManagedPolicy.from_aws_managed_policy_name("AmazonBedrockFullAccess")
+        )
 
         environment_variables = {
             "ENVIRONMENT": "production",
@@ -184,8 +282,74 @@ class BackendStack(Stack):
         )
         self.ec2_instance.add_user_data(commands.render())
 
-        self.eip = ec2.CfnEIP(
+
+        # ==============================================
+        #  EIP attach
+        # ==============================================
+        # 새로운 EIP 생성하여 EC2에 연결하는 방식
+        # self.eip = ec2.CfnEIP(
+        #     self,
+        #     "BackendEIP",
+        #     instance_id=self.ec2_instance.instance_id
+        # )
+
+        # Config에서 기존 EIP 정보 가져오기
+        materials_config = Config.get("Materials", {})
+        existing_eip_allocation_id = materials_config.get("eip_allocation_id")
+        existing_eip_address = materials_config.get("eip_address")
+
+        if not existing_eip_allocation_id or not existing_eip_address:
+            raise ValueError(
+                "Materials EIP configuration is missing. "
+                "Please set 'Materials.eip_allocation_id' and 'Materials.eip_address' in infra/utils.py"
+            )
+
+        # 기존 EIP를 새 EC2 인스턴스에 연결
+        self.eip_association = ec2.CfnEIPAssociation(
             self,
-            "BackendEIP",
-            instance_id=self.ec2_instance.instance_id
+            "MaterialsEIPAssociation",
+            allocation_id=existing_eip_allocation_id,
+            instance_id=self.ec2_instance.instance_id,
+        )
+
+        # ==============================================
+        #  S3 Instance
+        # ==============================================
+        # S3 버킷 - 이미지 업로드
+        self.uploads_bucket = s3.Bucket(
+            self,
+            "UploadsBucket",
+            bucket_name=f"myfridger-uploads-{self.account}-{self.region}",
+            removal_policy=removal_policy,
+            auto_delete_objects=not is_production,
+            versioned=is_production,
+            encryption=s3.BucketEncryption.S3_MANAGED,
+            # Public Read 접근 허용 (레시피 이미지를 인터넷 사용자가 볼 수 있도록)
+            public_read_access=True,
+            block_public_access=s3.BlockPublicAccess(
+                block_public_acls=False,
+                block_public_policy=False,
+                ignore_public_acls=False,
+                restrict_public_buckets=False
+            ),
+            cors=[
+                s3.CorsRule(
+                    allowed_methods=[
+                        s3.HttpMethods.GET,
+                        s3.HttpMethods.PUT,
+                        s3.HttpMethods.POST,
+                    ],
+                    allowed_origins=["*"],  # 프로덕션에서는 특정 도메인으로 제한
+                    allowed_headers=["*"],
+                )
+            ],
+        )
+        self.uploads_bucket.grant_read(self.ec2_instance.role)
+
+
+        CfnOutput(
+            self,
+            "VpcId",
+            value=self.vpc.vpc_id,
+            export_name="BackendVpc",
         )
