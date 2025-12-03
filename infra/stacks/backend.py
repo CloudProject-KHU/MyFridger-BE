@@ -256,6 +256,7 @@ class BackendStack(Stack):
             ),
             "DB_SECRET_NAME": self.db_instance.secret.secret_name,
             "AWS_REGION": self.region,
+            "OCR_API_KEY": Config.get("OCR_API_KEY", ""),
         }
         env_content = "\n".join([f"{k}={v}" for k, v in environment_variables.items()])
         commands = ec2.UserData.for_linux()
@@ -278,7 +279,7 @@ class BackendStack(Stack):
             'echo "DATABASE_PASSWORD=$DB_PASSWORD" >> ~/app/.env',
             # 의존성 설치 및 실행
             "cd ~/app && uv sync",
-            "cd ~/app && nohup uv run uvicorn app.main:app --host 0.0.0.0 --port 80 --app-dir ~/app",
+            "cd ~/app && nohup uv run uvicorn app.main:app --host 0.0.0.0 --port 80 --app-dir ~/app &",
         )
         self.ec2_instance.add_user_data(commands.render())
 

@@ -4,6 +4,7 @@ Config = {
   "Production": os.getenv("ENV") == "production",
   "Account": os.getenv("AWS_ACCOUNT_ID"),
   "Region": os.getenv("AWS_REGION"),
+  "OCR_API_KEY": os.getenv("OCR_API_KEY"),
 
   # Materials 서비스 설정
   "Materials": {
