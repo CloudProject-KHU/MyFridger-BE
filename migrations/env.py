@@ -8,6 +8,9 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
 
+from dotenv import load_dotenv
+load_dotenv()
+
 # Alebic 인식용 import
 # 만약 models폴더에 있는 파일을 인식 못한다면 models/__init__.py 파일에 해당 모델을 추가해주세요
 import app.models

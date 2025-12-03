@@ -279,6 +279,7 @@ class BackendStack(Stack):
             'echo "DATABASE_PASSWORD=$DB_PASSWORD" >> ~/app/.env',
             # 의존성 설치 및 실행
             "cd ~/app && uv sync",
+            "cd ~/app && uv run alembic upgrade head",
             "cd ~/app && nohup uv run uvicorn app.main:app --host 0.0.0.0 --port 80 --app-dir ~/app &",
         )
         self.ec2_instance.add_user_data(commands.render())
