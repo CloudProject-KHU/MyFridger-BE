@@ -90,12 +90,12 @@ async def create_materials_from_receipt(
         )
 
     result = response.json()
-    data = extract_items_from_ocr(result)
 
-    print("parsed!!!!!!!!!!!!!!")
-    print(result)
-    print(data)
-    print("parsed!!!!!!!!!!!!!!")
+    data = ""
+    for threshold in [5, 10, 15, 20]:
+        if isinstance(data, list) and len(data) > 0:
+            break
+        data = extract_items_from_ocr(result, 10, threshold)
 
     if isinstance(data, str):
         raise HTTPException(status_code=400, detail=data)

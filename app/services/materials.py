@@ -1,6 +1,6 @@
 import re
 
-def extract_items_from_ocr(json_data, threshold_x=150, threshold_y=16):
+def extract_items_from_ocr(json_data, threshold_x=10, threshold_y=10) -> list | str:
     """
     OCR Response로 부터 영수증 항목을 분리하는 함수 입니다.
     :param json_data: OCR API Response
@@ -59,9 +59,10 @@ def extract_items_from_ocr(json_data, threshold_x=150, threshold_y=16):
     for idx, row in enumerate(rows):
         row_text = "".join([w["WordText"] for w in row])
         normalized_text = row_text.replace(" ", "")
-        
+
+        score = len(list(filter(lambda k: k in normalized_text, ["상품", "품명", "단가", "수량", "금액"])))
         # 헤더 키워드 발견 시 좌표 매핑
-        if any(k in normalized_text for k in ["상품", "품명", "단가", "수량", "금액"]):
+        if score >= 2:
             header_found = True
             item_start_index = idx + 1
             
@@ -72,7 +73,7 @@ def extract_items_from_ocr(json_data, threshold_x=150, threshold_y=16):
                     if any(k in w_text for k in keywords):
                         column_map[col_type] = w_center
             break # 첫 번째 헤더 라인만 찾으면 중단
-    
+
     # 헤더를 못찾은 경우 fallback
     if not header_found:
         item_start_index = 0 
@@ -81,7 +82,7 @@ def extract_items_from_ocr(json_data, threshold_x=150, threshold_y=16):
     items = []
     current_item = {"name": "", "price": 0, "quantity": 1, "total": 0}
 
-    STOP_KEYWORDS = ["합계", "카드", "부가세", "과세", "면세", "결제", "거스름"]
+    STOP_KEYWORDS = ["합계", "부가세", "과세", "면세", "결제", "거스름"]
     
     for row in rows[item_start_index:]:
         row_text = "".join([str(w["WordText"]) for w in row])
@@ -96,6 +97,22 @@ def extract_items_from_ocr(json_data, threshold_x=150, threshold_y=16):
             break
             
         if "----" in row_text: continue
+
+        words = []
+        temp_word = ""
+        temp_x = 0
+        for word in row:
+            raw_text = str(word["WordText"])
+
+            if word["Left"] - temp_x > threshold_x:
+                words.append(temp_word.strip())
+                temp_word = ""
+
+            temp_word += " " + raw_text
+            temp_x = word["Left"] + word["Width"]
+
+        words.append(temp_word.strip())
+        temp_word = ""
 
         for word in row:
             raw_text = str(word["WordText"])
