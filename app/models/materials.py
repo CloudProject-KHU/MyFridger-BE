@@ -18,11 +18,11 @@ class MaterialBase(SQLModel):
 
 class Material(MaterialBase, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
-    user_id: str = Field(index=True)  # 사용자 ID (추후 users 테이블과 FK 연결)
+    # user_id: str = Field(index=True)  # 사용자 ID (추후 users 테이블과 FK 연결)
 
 
 class MaterialCreate(MaterialBase):
-    user_id: str
+    pass
 
 
 class MaterialUpdate(SQLModel):
