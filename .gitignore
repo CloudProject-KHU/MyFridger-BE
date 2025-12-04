@@ -1,6 +1,10 @@
 # Created by https://www.toptal.com/developers/gitignore/api/python,venv
 # Edit at https://www.toptal.com/developers/gitignore?templates=python,venv
 
+### Claude ###
+.claude/
+CLAUDE.md
+
 ### Python ###
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -190,3 +194,6 @@ pip-selfcheck.json
 # Environments
 .env
 .env.*
+
+# CDK
+cdk.out/

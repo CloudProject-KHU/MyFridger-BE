@@ -11,5 +11,37 @@ uv sync
 
 ## Dev
 ```bash
-uv run fastapi dev main.py
+uv run fastapi dev app/main.py
+```
+
+### Migration
+- Migration 생성
+```bash
+uv run alembic revision --autogenerate -m "[MIGRATION_MESSAGE]"
+```
+- DB에 적용
+```bash
+uv run alembic upgrade head
+```
+
+### Test
+```bash
+uv run pytest
+```
+
+### AWS IaC
+```bash
+cdk deploy
+```
+
+# Environments
+```shell
+ENV=development # development or production
+
+# DB는 postgresql을 사용합니다.
+DATABASE_NAME=name
+DATABASE_USER=user
+DATABASE_PASSWORD=password
+DATABASE_HOST=localhost
+DATABASE_PORT=5432
 ```
