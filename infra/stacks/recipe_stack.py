@@ -8,6 +8,7 @@ from aws_cdk import (
     aws_events as events,
     aws_events_targets as targets,
     aws_secretsmanager as secretsmanager,
+    aws_iam as iam,
     RemovalPolicy,
     CfnOutput,
 )
@@ -155,9 +156,17 @@ class RecipeStack(Stack):
         self.recipe_sync_metadata_secret.grant_read(self.recipe_sync_lambda)
         self.recipe_sync_metadata_secret.grant_write(self.recipe_sync_lambda)
 
-        # S3 버킷 쓰기 권한 부여
-        self.uploads_bucket.grant_put(self.recipe_sync_lambda)
+        # S3 버킷 쓰기 권한 부여 (ACL 설정 포함)
+        self.uploads_bucket.grant_write(self.recipe_sync_lambda)
         self.uploads_bucket.grant_read(self.recipe_sync_lambda)
+
+        # 명시적으로 PutObjectAcl 권한 추가
+        self.recipe_sync_lambda.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["s3:PutObjectAcl"],
+                resources=[f"{self.uploads_bucket.bucket_arn}/*"]
+            )
+        )
 
         # ======================
         # EventBridge Rule - 매주 월요일 오전 02시 KST
