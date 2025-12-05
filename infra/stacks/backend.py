@@ -328,6 +328,7 @@ class BackendStack(Stack):
             encryption=s3.BucketEncryption.S3_MANAGED,
             # Public Read 접근 허용 (레시피 이미지를 인터넷 사용자가 볼 수 있도록)
             public_read_access=True,
+            object_ownership=s3.ObjectOwnership.OBJECT_WRITER,  # ACL 사용 허용
             block_public_access=s3.BlockPublicAccess(
                 block_public_acls=False,
                 block_public_policy=False,

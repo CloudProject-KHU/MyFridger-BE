@@ -162,18 +162,31 @@ class RecipeSyncService:
             url = f"{self.base_url}/{self._api_key}/COOKRCP01/json/{start}/{end}"
         
         try:
+            print(f"Requesting URL: {url}")  # 디버깅: URL 출력
+
             async with httpx.AsyncClient(timeout=60.0) as client:
                 response = await client.get(url)
+
+                # 디버깅: 응답 상태 코드와 내용 출력
+                print(f"Response status: {response.status_code}")
+                print(f"Response headers: {dict(response.headers)}")
+                print(f"Response text (first 500 chars): {response.text[:500]}")
+
                 response.raise_for_status()
                 data = response.json()
-                
+
                 # API 응답 구조: {serviceId: {total_count: ..., row: [...]}}
                 service_id = 'COOKRCP01'
                 if service_id in data and 'row' in data[service_id]:
+                    print(f"Successfully parsed {len(data[service_id]['row'])} recipes")
                     return data[service_id]['row']
+                else:
+                    print(f"Unexpected API response structure: {list(data.keys())}")
                 return []
         except Exception as e:
             print(f"Failed to fetch recipes from API: {str(e)}")
+            import traceback
+            print(f"Traceback: {traceback.format_exc()}")
             return []
     
     async def sync_recipe(self, session: AsyncSession, recipe_data: Dict) -> Optional[Recipe]:

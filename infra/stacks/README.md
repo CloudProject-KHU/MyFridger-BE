@@ -1,298 +1,309 @@
-# MyFridger AWS Infrastructure
+MyFridger Backend - AWS Architecture Diagram
+═══════════════════════════════════════════════════════════════════════════════════════
 
-## 아키텍처 개요
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                                  Internet Users                                      │
+│                            (Mobile App / Web Clients)                                │
+└─────────────────────────┬────────────────────────────┬──────────────────────────────┘
+                          │                            │
+                          │ HTTPS                      │ HTTPS (Direct Access)
+                          ▼                            ▼
+              ┌───────────────────────┐    ┌─────────────────────────────┐
+              │   Elastic IP (EIP)    │    │      S3 Bucket (Public)     │
+              │   52.78.138.82        │    │  myfridger-uploads-*        │
+              └───────────┬───────────┘    │  ┌─────────────────────┐   │
+                          │                │  │ recipes/{id}/       │   │
+                          │                │  │ - thumbnail.jpg     │   │
+═════════════════════════▼════════════════│══│ - manual_01.jpg     │═══│═══════════════
+║                      VPC (10.0.0.0/16)  │  │ ACL: public-read    │   │              ║
+║                                         │  │ Cache: 31536000s    │   │              ║
+║  ┌──────────────────────────────────┐  │  └─────────────────────┘   │              ║
+║  │  Public Subnet (10.0.0.0/24)     │  │                             │              ║
+║  │                                  │  └─────────────────────────────┘              ║
+║  │  ┌────────────────────────────┐ │                                                ║
+║  │  │   EC2 Instance (Backend)   │ │                                                ║
+║  │  │   - Type: t3.micro         │ │                                                ║
+║  │  │   - OS: Amazon Linux 2023  │ │                                                ║
+║  │  │   - App: FastAPI + Uvicorn │ │                                                ║
+║  │  │   - Port: 80 (HTTP)        │ │                                                ║
+║  │  │   - IAM: Bedrock Full      │◄┼──────────┐                                     ║
+║  │  │   - Env: DATABASE_PASSWORD │ │          │                                     ║
+║  │  │          OCR_API_KEY        │ │          │                                     ║
+║  │  └───────────┬────────────────┘ │          │                                     ║
+║  │              │                   │          │                                     ║
+║  │              │ Session Manager   │          │                                     ║
+║  │              │ (Browser-based)   │          │                                     ║
+║  │              ▼                   │          │ Read Secret                         ║
+║  │  ┌────────────────────────────┐ │          │                                     ║
+║  │  │  VPC Interface Endpoints   │ │          │                                     ║
+║  │  │  - SSM (~$2.40/mo)        │ │          │                                     ║
+║  │  │  - SSM Messages            │ │          │                                     ║
+║  │  │  - EC2 Messages            │ │          │                                     ║
+║  │  └────────────────────────────┘ │          │                                     ║
+║  │                                  │          │                                     ║
+║  │  ┌────────────────────────────┐ │          │                                     ║
+║  │  │   NAT Gateway              │ │          │                                     ║
+║  │  │   3.35.124.234             │─┼──────┐   │                                     ║
+║  │  │   (~$40/mo)                │ │      │   │                                     ║
+║  │  └────────────────────────────┘ │      │   │                                     ║
+║  └──────────────────────────────────┘      │   │                                     ║
+║                                            │   │                                     ║
+║  ┌──────────────────────────────────┐      │   │                                     ║
+║  │ Private Subnet (EGRESS)          │      │   │                                     ║
+║  │ 10.0.1.0/24                      │      │   │                                     ║
+║  │                                  │      │   │                                     ║
+║  │  ┌────────────────────────────┐ │      │   │                                     ║
+║  │  │ Lambda: RecipeSyncLambda   │ │      │   │                                     ║
+║  │  │ - Runtime: Python 3.12     │ │      │   │                                     ║
+║  │  │ - Memory: 512 MB           │ │      │   │                                     ║
+║  │  │ - Timeout: 600s (10 min)   │ │      │   │                                     ║
+║  │  │ - Trigger: EventBridge     │ │      │   │                                     ║
+║  │  │   (Monthly, 04:00 KST)     │ │      │   │                                     ║
+║  │  │ - Layer: dependencies.zip  │ │      │   │                                     ║
+║  │  └───────┬────────────────────┘ │      │   │                                     ║
+║  │          │                       │      │   │                                     ║
+║  │          │ NAT Gateway           │      │   │                                     ║
+║  │          └───────────────────────┼──────┘   │                                     ║
+║  │                                  │          │                                     ║
+║  └──────────────────────────────────┘          │                                     ║
+║                                                │                                     ║
+║              │                                 │                                     ║
+║              │ 5432 (PostgreSQL)               │                                     ║
+║              ▼                                 │                                     ║
+║  ┌──────────────────────────────────┐          │                                     ║
+║  │ Private Subnet (ISOLATED)        │          │                                     ║
+║  │ 10.0.2.0/24                      │          │                                     ║
+║  │                                  │          │                                     ║
+║  │  ┌────────────────────────────┐ │          │                                     ║
+║  │  │  RDS PostgreSQL Instance   │ │          │                                     ║
+║  │  │  - Type: db.t3.micro       │ │          │                                     ║
+║  │  │  - Engine: PostgreSQL 16   │ │          │                                     ║
+║  │  │  - Storage: 20GB GP3       │ │          │                                     ║
+║  │  │  - Database: fridger       │ │          │                                     ║
+║  │  │  - User: fridger           │ │          │                                     ║
+║  │  │  - Multi-AZ: No            │ │          │                                     ║
+║  │  │  - Backup: 0 days          │ │          │                                     ║
+║  │  │  - Tables:                 │ │          │                                     ║
+║  │  │    * materials             │ │          │                                     ║
+║  │  │    * recipes               │ │          │                                     ║
+║  │  │    * recipe_recommendation │ │          │                                     ║
+║  │  └────────────────────────────┘ │          │                                     ║
+║  └──────────────────────────────────┘          │                                     ║
+║                                                │                                     ║
+║  ┌──────────────────────────────────┐          │                                     ║
+║  │  VPC Gateway Endpoint (S3)       │          │                                     ║
+║  │  - Type: Gateway (Free)          │──────────┼───────┐                             ║
+║  │  - Target: Private Subnet        │          │       │                             ║
+║  └──────────────────────────────────┘          │       │                             ║
+║                                                │       │                             ║
+═════════════════════════════════════════════════╪═══════╪═════════════════════════════
+                                                 │       │
+                         ┌───────────────────────┘       │
+                         │                               │
+                         ▼                               ▼
+┌─────────────────────────────────────┐   ┌──────────────────────────────────────┐
+│   AWS Secrets Manager               │   │   Amazon S3                          │
+│                                     │   │   myfridger-uploads-870678672312-... │
+│  1. fridger/db-credentials          │   │                                      │
+│     - username: fridger             │   │   Lambda Upload (via VPC Endpoint):  │
+│     - password: auto-generated      │   │   - Timeout: 120s                    │
+│                                     │   │   - Follow Redirects: True           │
+│  2. fridger/food-safety-api-key     │   │   - ACL: public-read                 │
+│     - api_key: YOUR_API_KEY_HERE    │   │   - Content-Type: image/jpeg         │
+│                                     │   │   - Cache-Control: max-age=31536000  │
+│  3. fridger/recipe-sync-metadata    │   │                                      │
+│     - last_sync_date: 20000101      │   │   Objects:                           │
+│       (Lambda updates monthly)      │   │   - recipes/1/thumbnail.jpg          │
+└─────────────────────────────────────┘   │   - recipes/1/manual_01.jpg          │
+                                          │   - ... (1,146 recipes total)        │
+         ▲                                └──────────────────────────────────────┘
+         │
+         │ Read Secret
+         │
+┌────────┴──────────────────────────────┐
+│   Amazon EventBridge                  │
+│                                       │
+│   Rule: RecipeSyncSchedule            │
+│   - Schedule: cron(0 19 1 * ? *)      │
+│   - Time: Monthly, 1st day, 04:00 KST │
+│   - Target: RecipeSyncLambda          │
+│   - Status: Enabled                   │
+└───────────────────────────────────────┘
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    FridgerBackend Stack                     │
-│  (공유 인프라 - VPC, RDS, EC2, S3, Secrets)                   │
-│                                                             │
-│  ┌─────────────┐  ┌──────────────┐  ┌─────────────────┐     │
-│  │     VPC     │  │ RDS Postgres │  │   S3 Bucket     │     │
-│  │ 10.0.0.0/16 │  │  db.t3.micro │  │ (레시피 이미지)   │     │
-│  │  2 AZ, NAT:0│  │    20GB GP3  │  │                 │     │
-│  └─────────────┘  └──────────────┘  └─────────────────┘     │
-│                                                             │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │ EC2 Instance (Materials API)                         │   │
-│  │ - FastAPI Server (Port 80)                           │   │
-│  │ - EIP: 52.78.138.82                                  │   │
-│  │ - Public Subnet                                      │   │
-│  └──────────────────────────────────────────────────────┘   │
-│                                                             │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │ Secrets Manager                                      │   │
-│  │ - DB Credentials                                     │   │
-│  │ - Food Safety API Key                                │   │
-│  │ - Recipe Sync Metadata                               │   │
-│  └──────────────────────────────────────────────────────┘   │
-│                                                             │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │ VPC Endpoints                                        │   │
-│  │ - S3 Gateway Endpoint (Lambda → S3)                  │   │
-│  │ - SSM Interface Endpoints (Session Manager)          │   │
-│  │   * SSM, SSM_MESSAGES, EC2_MESSAGES                  │   │
-│  └──────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────┘
-                               ↓ 의존성
-┌─────────────────────────────────────────────────────────────┐
-│                   MyFridger-Recipe Stack                    │
-│          (레시피 동기화 - Lambda + EventBridge)               │
-│                                                             │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │ Lambda Function (Recipe Sync)                        │   │
-│  │ - Runtime: Python 3.12                               │   │
-│  │ - Memory: 1024MB, Timeout: 15min                     │   │
-│  │ - VPC: Private Subnet                                │   │
-│  │ - 식품안전나라 API → RDS/S3 저장                        │   │
-│  └──────────────────────────────────────────────────────┘   │
-│                                                             │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │ EventBridge Rule                                     │   │
-│  │ - Schedule: 매달 1일 04:00 KST                        │   │
-│  │ - Target: Lambda Function                            │   │
-│  └──────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────┘
-```
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│ FridgerBackend Stack                                        │
-│ (공유 인프라 - VPC, RDS, EC2, S3, Secrets, Network)           │
-│                                                             │
-│ ┌──────────────────────┐ ┌─────────────────────────┐        │
-│ │ Public Subnet        │ │ Private Subnet          │        │
-│ │ (Internet O)         │ │ (With NAT Egress)       │        │
-│ │                      │ │                         │        │
-│ │ ┌──────────────────┐ │ │ ┌─────────────────────┐ │        │
-│ │ │ EC2 Instance     │ │ │ │ RDS Postgres        │ │        │
-│ │ │ (FastAPI Server) │ │ │ │ db.t3.micro         │ │        │
-│ │ └─────────┬────────┘ │ │ └──────────▲──────────┘ │        │
-│ │           │          │ │            │(SG Ref)    │        │
-│ │ ┌─────────▼────────┐ │ │ ┌──────────┴──────────┐ │        │
-│ │ │ NAT Gateway      │◀──┼─┤ Lambda Function    │ │        │
-│ │ └─────────┬────────┘ │ │ │ (Recipe Sync)       │ │        │
-│ │           │          │ │ └──────────┬──────────┘ │        │
-│ └───────────┼──────────┘ │            │            │        │
-│             │            │ ┌──────────▼──────────┐ │        │
-│             │            │ │ S3 Gateway Endpoint │ │        │
-│             │            │ └──────────┬──────────┘ │        │
-│             │            └────────────┼────────────┘        │
-│             │                         │                     │ └─────────────┼─────────────────────────┼─────────────────────┘
-              │                         │
-     ┌────────▼────────┐      ┌─────────▼─────────┐ 
-     │ Internet Gateway│      │ S3 Bucket         │
-     └─────────────────┘      │ (Recipe Images)   │
-                              └───────────────────┘
-```
+         ▲
+         │
+         │ Invoke Model
+         │
+┌────────┴──────────────────────────────┐
+│   Amazon Bedrock (us-east-1)          │
+│                                       │
+│   Model: Nova Lite                    │
+│   - Use Case: AI Expiry Estimation    │
+│   - API: /recommends/expire           │
+│   - Option: use_ai=true (default)     │
+│   - Fallback: Rule-based estimation   │
+│   - Confidence: 0.8~0.95              │
+└───────────────────────────────────────┘
 
-<br>
-<br>
 
----
+                         External APIs
+┌─────────────────────────────────────────────────────────────────┐
+│  식품안전나라 (Food Safety Korea) API                            │
+│                                                                 │
+│  Lambda → NAT Gateway (3.35.124.234) → Internet → API Server    │
+│                                                                 │
+│  - Endpoint: http://openapi.foodsafetykorea.go.kr/api/...      │
+│  - Purpose: Recipe data synchronization                        │
+│  - Frequency: Monthly (EventBridge trigger)                    │
+│  - Data: Recipe info, ingredients, cooking steps, images       │
+└─────────────────────────────────────────────────────────────────┘
 
-## 스택 구성 (여기부터 내용 수정 필요)
 
-### 1️⃣ FridgerBackend (공유 인프라)
+═══════════════════════════════════════════════════════════════════════════════════════
+                                   Data Flows
+═══════════════════════════════════════════════════════════════════════════════════════
 
-**리소스:**
-- **VPC**: 10.0.0.0/16, (2 AZ)
-  - Public Subnet: 외부 통신이 필요한 리소스 (EC2, NAT Gateway)
-  - Private Subnet: 외부 접근이 차단된 리소스 (RDS, Lambda)
-  - NAT Gateway: 1개 (Private 리소스의 인터넷 접속 지원)
-- **RDS PostgreSQL 16**: db.t3.micro, 20GB GP3 (프리티어) - Private Subnet 배치
-- **EC2 (Materials API)**: t3.micro, FastAPI, EIP 52.78.138.82, Public Subnet 배치
-- **S3 Bucket**: 레시피 이미지 저장 (Gateway Endpoint 사용)
-- **Secrets Manager**: DB 자격증명 및 API Keys 관리
-- **VPC Endpoints**:
-  - S3 Gateway Endpoint (Lambda → S3)
-  - SSM Interface Endpoints (Session Manager: SSM, SSM_MESSAGES, EC2_MESSAGES)
+1. User API Request Flow:
+   Internet → EIP (52.78.138.82) → EC2 (FastAPI) → RDS (PostgreSQL)
+                                 ← ← ← ← ← ← ← ← ← ← ← ← ← ← ← ← ← ← ←
 
-### 2️⃣ MyFridger-Recipe (레시피 동기화)
+2. Recipe Sync Flow (Monthly):
+   EventBridge → Lambda (Private Subnet) → NAT Gateway → Food Safety API
+                    │                          │
+                    │                          └─→ S3 (Upload Images via VPC Endpoint)
+                    └──────────────────────────→ RDS (Save Recipe Data)
+                    └──────────────────────────→ Secrets Manager (Update last_sync_date)
 
-**리소스:**
-- **Lambda Function**: Python 3.12, 1024MB, 15분 타임아웃
-  - **네트워크**: Private Subnet + NAT Gateway
-  - 역할: 외부 API 데이터 수집 및 가공
-- **EventBridge Rule**: 매달 1일 04:00 KST 실행
-- **Lambda Security Group**: VPC 내부 RDS/S3 접근 + 외부 API 접근
+3. Image Access Flow:
+   Internet User → S3 (Direct Public Access, No EC2 Proxy)
+                   └─→ CloudFront CDN (Optional, future enhancement)
 
-**의존성**: FridgerBackend의 VPC, RDS, S3, Secrets 사용
+4. AI Expiry Estimation Flow:
+   User → EC2 API (/recommends/expire) → Bedrock (us-east-1) → EC2 → User
+                                          (Nova Lite Model)
 
----
+5. Session Manager Access:
+   Admin Browser → AWS Console → SSM Interface Endpoints → EC2 Instance
+                   (No SSH key required, No port 22 exposure)
 
-## 네트워크 구조
+6. Recipe Recommendation Flow:
+   User → EC2 (/recommends/recipes) → RDS (Query Materials + Recipes)
+                                    → Calculate Matching Score:
+                                      * Substring matching: "두부" matches "순두부 70g"
+                                      * Priority weight: HIGH (D-3) = 2.0x
+                                      * Base match ratio × priority weight
+                                    ← Return top N recommendations
 
-```
-VPC: 10.0.0.0/16
-├── AZ-A (ap-northeast-2a)
-│   ├── Public Subnet (10.0.0.0/24)
-│   │   ├── EC2 (Materials API) ← EIP 52.78.138.82
-│   │   ├── Lambda (Recipe Sync) ← 개발 환경
-│   │   └── SSM Interface Endpoints (Session Manager)
-│   └── Private Isolated (10.0.2.0/24)
-│       └── RDS PostgreSQL
-└── AZ-B (ap-northeast-2b)
-    ├── Public Subnet (10.0.1.0/24)
-    │   └── (Lambda Multi-AZ 대비)
-    └── Private Isolated (10.0.3.0/24)
-        └── RDS (Multi-AZ 대비)
-```
 
-**라우팅:**
-- **Public Subnet** → Internet Gateway (외부 인터넷 양방향 접근)
-  - EIP를 통해 외부에서 EC2 접근 가능
-  - VPC 내부 통신
-- **Private Isolated Subnet** → NAT Gateway 없음 (VPC 내부만)
-  - RDS는 VPC 내부에서만 접근 가능 (보안)
-  - S3 Gateway Endpoint를 통한 S3 접근만 허용
+═══════════════════════════════════════════════════════════════════════════════════════
+                              Security Configuration
+═══════════════════════════════════════════════════════════════════════════════════════
 
-**Internet Gateway 동작:**
-```
-Lambda (Public Subnet)
-    ↕ Route: 0.0.0.0/0 → Internet Gateway
-Internet Gateway
-    ↕
-외부 API (식품안전나라 openapi.foodsafetykorea.go.kr)
-```
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│ EC2 Security Group                                                                   │
+│ - Ingress: 0.0.0.0/0:22 (SSH), 0.0.0.0/0:80 (HTTP), 0.0.0.0/0:443 (HTTPS)          │
+│ - Egress: All traffic allowed                                                       │
+└─────────────────────────────────────────────────────────────────────────────────────┘
 
----
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│ RDS Security Group                                                                   │
+│ - Ingress: EC2 Security Group:5432, Lambda Security Group:5432                      │
+│ - Egress: None (isolated)                                                           │
+└─────────────────────────────────────────────────────────────────────────────────────┘
 
-## Security Groups
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│ Lambda Security Group                                                                │
+│ - Ingress: None                                                                      │
+│ - Egress: All traffic (via NAT Gateway)                                             │
+└─────────────────────────────────────────────────────────────────────────────────────┘
 
-```python
-# EC2 Security Group
-Ingress:
-  - 0.0.0.0/0 → TCP 22 (SSH)
-  - 0.0.0.0/0 → TCP 80 (HTTP)
-  - 0.0.0.0/0 → TCP 443 (HTTPS)
-Egress: All
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│ S3 Bucket Policy (Public Read)                                                       │
+│ - public_read_access: True                                                           │
+│ - Block Public ACLs: False                                                           │
+│ - Block Public Policy: False                                                         │
+│ - Ignore Public ACLs: False                                                          │
+│ - Restrict Public Buckets: False                                                     │
+│ - Object ACL: public-read (set on each upload)                                       │
+└─────────────────────────────────────────────────────────────────────────────────────┘
 
-# RDS Security Group
-Ingress:
-  - EC2 Security Group → TCP 5432
-  - Lambda Security Group → TCP 5432  # Lambda 접근
-Egress: None
 
-# Lambda Security Group
-Ingress: None
-Egress: All  # RDS, S3, Secrets Manager, 외부 API 접근
-```
+═══════════════════════════════════════════════════════════════════════════════════════
+                              Cost Breakdown (Monthly)
+═══════════════════════════════════════════════════════════════════════════════════════
 
----
+EC2 (t3.micro, on-demand):              ~$7.50
+RDS (db.t3.micro):                      ~$15.00
+NAT Gateway:                            ~$32.00 (idle) + data transfer
+  - Data Processing: $0.045/GB
+  - Estimated transfer: ~5GB/month      ~$0.23
+S3 Storage (20GB):                      ~$0.50
+S3 Requests (PUT/GET):                  ~$0.10
+VPC Interface Endpoints (3):            ~$7.20
+  - SSM, SSM Messages, EC2 Messages
+  - $0.01/hour × 3 endpoints × 720 hours
+Elastic IP:                             Free (attached)
+VPC Gateway Endpoint (S3):              Free
+EventBridge:                            Free (low volume)
+Secrets Manager (3 secrets):            ~$1.20
+  - $0.40/secret/month
+Lambda Execution:                       Free tier eligible
+  - 1 invocation/month, 600s × 512MB
+Bedrock (Nova Lite):                    Pay per use
+  - Input: $0.00006/1K tokens
+  - Output: $0.00024/1K tokens
+  - Estimated: ~$2-5/month
 
-## 데이터 흐름
+─────────────────────────────────────────────────────────────────────────────────────
+Total Estimated Cost:                   ~$65-70/month
+─────────────────────────────────────────────────────────────────────────────────────
 
-### Materials API 요청:
-```
-Client → EIP (52.78.138.82) → EC2 (FastAPI) → RDS → Response
-```
+Cost Optimization Notes:
+- NAT Gateway is the most expensive component (~50% of total)
+- Alternative: VPC Endpoints for specific services (more cost-effective if <5GB/month)
+- RDS can be stopped when not in use (development only)
+- Consider Reserved Instances for 40-60% savings (production)
 
-### Recipe Sync (개발 환경):
-```
-EventBridge (매주 월요일 02:00 KST)
-    ↓
-Lambda Function (Public Subnet)
-    ├→ Internet Gateway → 식품안전나라 API (레시피 데이터)
-    ├→ Secrets Manager (API Key, DB 자격증명)
-    ├→ VPC 내부 → RDS (레시피 저장)
-    └→ S3 Gateway Endpoint → S3 (이미지 업로드)
-```
 
----
+═══════════════════════════════════════════════════════════════════════════════════════
+                           Key Configuration Settings
+═══════════════════════════════════════════════════════════════════════════════════════
 
-## 주요 설정
+Environment Variables (EC2):
+  - ENVIRONMENT: production
+  - DATABASE_HOST: <rds-endpoint>.ap-northeast-2.rds.amazonaws.com
+  - DATABASE_PORT: 5432
+  - DATABASE_NAME: fridger
+  - DATABASE_USER: fridger
+  - DATABASE_PASSWORD: <from-secrets-manager>
+  - DB_SECRET_NAME: <secret-arn>
+  - AWS_REGION: ap-northeast-2
+  - OCR_API_KEY: <user-provided>
 
-### Database (RDS)
-- **Database Name**: `fridger`
-- **Username**: `fridger`
-- **Connection**: Private Subnet, VPC 내부 접근만
+Environment Variables (Lambda):
+  - DATABASE_PASSWORD: Optional (defaults to Secrets Manager)
+  - All other settings inherited from backend stack
 
-### S3 Bucket
-- **Naming**: `myfridger-uploads-{account}-{region}`
-- **CORS**: GET, PUT, POST 허용
-- **Encryption**: S3-Managed (SSE-S3)
+Recipe Matching Logic:
+  - Substring Matching: "두부" matches "순두부 70g" (one-way)
+  - Priority Weights:
+    * HIGH (D-3): 2.0x multiplier
+    * MEDIUM (D-7): 1.3x multiplier
+    * NORMAL: 1.0x multiplier
+  - Min Match Ratio: 0.3 (default, 30% ingredients must match)
+  - Scoring: base_match_ratio × priority_weight
 
-### Lambda Environment
-```env
-ENVIRONMENT=production
-DATABASE_HOST=<rds-endpoint>
-DATABASE_NAME=fridger
-S3_BUCKET_NAME=<bucket-name>
-FOOD_SAFETY_API_BASE_URL=http://openapi.foodsafetykorea.go.kr/api
-```
+S3 Upload Configuration:
+  - Timeout: 120 seconds (increased from 30s)
+  - Follow Redirects: True
+  - Cache Control: max-age=31536000 (1 year)
+  - ACL: public-read (all uploaded objects)
+  - Content-Type: Auto-detected (image/jpeg, image/png, image/gif)
 
-### Session Manager
-- **EC2 IAM Role**: AmazonSSMManagedInstanceCore
-- **VPC Interface Endpoints**: SSM, SSM_MESSAGES, EC2_MESSAGES
-- **접속 방법**: AWS Console 또는 AWS CLI
-
----
-
-## 배포
-
-### 배포 순서:
-```bash
-1. cdk deploy FridgerBackend       # 공유 인프라
-2. cdk deploy MyFridger-Recipe     # Recipe 스택 (의존성 자동)
-```
-
-### 한 번에 배포:
-```bash
-cdk deploy --all
-```
-
-### 배포 후 확인:
-```bash
-# CloudFormation Outputs 확인
-aws cloudformation describe-stacks \
-  --stack-name FridgerBackend \
-  --query 'Stacks[0].Outputs'
-
-# EC2 접속 (Session Manager)
-aws ssm start-session --target <instance-id>
-
-# API 테스트
-curl http://52.78.138.82/docs
-```
-
----
-
-## 비용 예상 (프리티어)
-
-| 리소스 | 비용 |
-|--------|------|
-| EC2 (t3.micro) | 무료 (750시간/월) |
-| RDS (db.t3.micro, 20GB) | 무료 (750시간/월, 20GB) |
-| S3 | 무료 (5GB, 20K GET, 2K PUT) |
-| Lambda | 무료 (100만 requests, 400K GB-초) |
-| Secrets Manager | ~$1.20/월 (3개 secrets × $0.40) |
-| VPC Gateway Endpoint (S3) | 무료 |
-| VPC Interface Endpoint (SSM) | ~$7.20/월 ($0.01/시간 × 3개 × 720시간) |
-
-**총 예상 비용**: ~$8-10/월 (프리티어 적용 시)
-
----
-
-## 주요 파일
-
-```
-infra/
-├── app.py                    # 스택 정의 및 연결
-├── utils.py                  # Config (EIP, Lambda 설정)
-├── cdk.json                  # CDK 설정
-└── stacks/
-    ├── __init__.py
-    ├── backend.py            # 공유 인프라 (VPC, RDS, EC2, S3, SSM)
-    └── recipe_stack.py       # Recipe Lambda + EventBridge
-```
-
----
-
-## 문서 정보
-
-- **작성일**: 2025-12-01
-- **배포 리전**: ap-northeast-2 (서울)
-- **AWS 계정**: 870678672312 (프리티어)
-- **CDK 버전**: 2.227.0+
-- **환경**: 개발/테스트 (Lambda Public Subnet)
+Bedrock Configuration:
+  - Region: us-east-1 (Nova Lite availability)
+  - Model: amazon.nova-lite-v1:0
+  - Max Tokens: 2048
+  - Temperature: 0.7
+  - Fallback: Rule-based estimation if AI fails
