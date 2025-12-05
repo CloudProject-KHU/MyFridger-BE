@@ -227,6 +227,7 @@ class RecipeSyncService:
                     if s3_url:
                         manual_image_s3_urls.append(s3_url)
             
+            # UPSERT: 기존 레시피가 있으면 UPDATE, 없으면 INSERT
             if existing_recipe:
                 # 기존 이미지 삭제 (새 이미지로 교체)
                 if manual_image_s3_urls:  # 새 이미지가 있을 때만 삭제
@@ -241,7 +242,8 @@ class RecipeSyncService:
                 existing_recipe.material_names = material_names
                 existing_recipe.image_url = manual_image_s3_urls
 
-                session.add(existing_recipe)
+                # 명시적으로 flush (롤백 상태 방지)
+                await session.flush()
                 return existing_recipe
             else:
                 # 새로 생성
@@ -256,6 +258,7 @@ class RecipeSyncService:
                     image_url=manual_image_s3_urls
                 )
                 session.add(new_recipe)
+                await session.flush()  # 명시적으로 flush
                 return new_recipe
                 
         except Exception as e:
@@ -293,15 +296,21 @@ class RecipeSyncService:
             if not recipes:
                 break
             
-            # 각 레시피 동기화
+            # 각 레시피 동기화 (개별 커밋으로 롤백 에러 방지)
             for recipe_data in recipes:
-                result = await self.sync_recipe(session, recipe_data)
-                if result:
-                    total_synced += 1
-            
-            # 배치 커밋
-            await session.commit()
-            print(f"Synced {len(recipes)} recipes (Total: {total_synced})")
+                try:
+                    result = await self.sync_recipe(session, recipe_data)
+                    if result:
+                        # 각 레시피마다 개별 커밋 (IntegrityError 방지)
+                        await session.commit()
+                        total_synced += 1
+                except Exception as e:
+                    # 에러 발생 시 롤백 후 다음 레시피 계속 처리
+                    await session.rollback()
+                    recipe_id = recipe_data.get('RCP_SEQ', 'unknown')
+                    print(f"Failed to sync recipe {recipe_id}, rolled back: {str(e)}")
+
+            print(f"Synced {total_synced} recipes in this batch (Total: {total_synced})")
             
             # 다음 배치로
             if len(recipes) < batch_size:
