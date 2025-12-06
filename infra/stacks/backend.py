@@ -52,6 +52,15 @@ class BackendStack(Stack):
                 '{"api_key": "YOUR_API_KEY_HERE"}'  # 배포 후 콘솔에서 변경
             )
         )
+        self.ocr_api_key = secretsmanager.Secret(
+            self,
+            "OcrAPISecret",
+            secret_name="fridger/ocr-api-key",
+            description="OCR API Key",
+            secret_string_value=SecretValue.unsafe_plain_text(
+                'OCR_KEY_HERE'  # 배포 후 콘솔에서 변경
+            )
+        )
 
         # Recipe Sync Metadata를 Secret Manager에 저장
         # 초기값은 20000101로 설정
@@ -255,8 +264,8 @@ class BackendStack(Stack):
                 credentials.password if credentials.password is not None else ""
             ),
             "DB_SECRET_NAME": self.db_instance.secret.secret_name,
+            "OCR_SECRET_NAME": self.ocr_api_key.secret_name,
             "AWS_REGION": self.region,
-            "OCR_API_KEY": Config.get("OCR_API_KEY", ""),
         }
         env_content = "\n".join([f"{k}={v}" for k, v in environment_variables.items()])
         commands = ec2.UserData.for_linux()
@@ -274,9 +283,14 @@ class BackendStack(Stack):
             # Secrets Manager에서 비밀번호 파싱 후 .env에 추가
             f"export DB_SECRET_NAME={self.db_instance.secret.secret_name}",
             f"export AWS_REGION={self.region}",
-            "SECRET_JSON=$(aws secretsmanager get-secret-value --secret-id $DB_SECRET_NAME --region $AWS_REGION --query SecretString --output text)",
-            "DB_PASSWORD=$(echo $SECRET_JSON | jq -r .password)",
+            f"export OCR_SECRET_NAME={self.ocr_api_key.secret_name}",
+            # DB secret inject
+            "DB_SECRET_JSON=$(aws secretsmanager get-secret-value --secret-id $DB_SECRET_NAME --region $AWS_REGION --query SecretString --output text)",
+            "DB_PASSWORD=$(echo $DB_SECRET_JSON | jq -r .password)",
             'echo "DATABASE_PASSWORD=$DB_PASSWORD" >> ~/app/.env',
+            # OCR API Key inject
+            "OCR_API_KEY=$(aws secretsmanager get-secret-value --secret-id $OCR_SECRET_NAME --region $AWS_REGION --query SecretString --output text)",
+            'echo "OCR_API_KEY=$OCR_API_KEY" >> ~/app/.env',
             # 의존성 설치 및 실행
             "cd ~/app && uv sync",
             "cd ~/app && uv run alembic upgrade head",
