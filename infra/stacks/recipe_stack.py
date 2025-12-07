@@ -190,6 +190,80 @@ class RecipeStack(Stack):
             targets.LambdaFunction(self.recipe_sync_lambda)
         )
 
+        # ======================
+        # Lambda Function - Manual Recipe Sync (수동 호출용)
+        # ======================
+
+        self.manual_recipe_sync_lambda = lambda_.Function(
+            self,
+            "ManualRecipeSyncLambda",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="recipe_manual_sync_handler.lambda_handler",
+            code=lambda_.Code.from_asset(
+                ".",
+                exclude=[
+                    "cdk.out",
+                    ".git",
+                    ".gitignore",
+                    "*.md",
+                    "**/__pycache__",
+                    "venv",
+                    ".venv",
+                    ".env",
+                    "tests",
+                    "infra",
+                ],
+                bundling=None if skip_bundling else {
+                    "image": lambda_.Runtime.PYTHON_3_12.bundling_image,
+                    "command": [
+                        "bash", "-c",
+                        "pip install -r lambda/requirements.txt -t /asset-output && "
+                        "cp -r lambda/* /asset-output/ && "
+                        "cp -r app /asset-output/app"
+                    ],
+                }
+            ),
+            timeout=Duration.minutes(lambda_timeout_minutes),
+            memory_size=lambda_memory_size,
+            vpc=self.vpc,
+            vpc_subnets=ec2.SubnetSelection(
+                subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS
+            ),
+            security_groups=[self.lambda_sg],
+            environment={
+                "ENVIRONMENT": "production",
+                "SERVICE_NAME": "recipe_manual",
+                "DATABASE_HOST": self.db_instance.db_instance_endpoint_address,
+                "DATABASE_PORT": "5432",
+                "DATABASE_NAME": database_name,
+                "DATABASE_USER": database_username,
+                "DB_SECRET_NAME": self.db_instance.secret.secret_name if self.db_instance.secret else "",
+                "FOOD_SAFETY_API_SECRET_NAME": self.food_safety_api_secret.secret_name,
+                "FOOD_SAFETY_API_BASE_URL": "http://openapi.foodsafetykorea.go.kr/api",
+                "S3_BUCKET_NAME": self.uploads_bucket.bucket_name,
+                "S3_RECIPE_PREFIX": "recipes",
+            },
+        )
+
+        # Manual Lambda에 권한 부여
+        if self.db_instance.secret:
+            self.db_instance.secret.grant_read(self.manual_recipe_sync_lambda)
+        self.food_safety_api_secret.grant_read(self.manual_recipe_sync_lambda)
+        self.recipe_sync_metadata_secret.grant_read(self.manual_recipe_sync_lambda)
+        self.recipe_sync_metadata_secret.grant_write(self.manual_recipe_sync_lambda)
+
+        # S3 버킷 쓰기 권한 부여 (ACL 설정 포함)
+        self.uploads_bucket.grant_write(self.manual_recipe_sync_lambda)
+        self.uploads_bucket.grant_read(self.manual_recipe_sync_lambda)
+
+        # 명시적으로 PutObjectAcl 권한 추가
+        self.manual_recipe_sync_lambda.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["s3:PutObjectAcl"],
+                resources=[f"{self.uploads_bucket.bucket_arn}/*"]
+            )
+        )
+
 
         # Outputs
         CfnOutput(
@@ -204,4 +278,18 @@ class RecipeStack(Stack):
             "RecipeSyncSchedule",
             value="Every Monday at 02:00 AM KST (Sunday 17:00 UTC)",
             description="Recipe Sync EventBridge Schedule",
+        )
+
+        CfnOutput(
+            self,
+            "ManualRecipeSyncLambdaArn",
+            value=self.manual_recipe_sync_lambda.function_arn,
+            description="Manual Recipe Sync Lambda Function ARN (invoke with start_index, end_index)",
+        )
+
+        CfnOutput(
+            self,
+            "ManualRecipeSyncLambdaName",
+            value=self.manual_recipe_sync_lambda.function_name,
+            description="Manual Recipe Sync Lambda Function Name",
         )

@@ -325,5 +325,56 @@ class RecipeSyncService:
         print(f"Sync completed. Total synced: {total_synced} recipes")
         return total_synced
 
+    async def sync_recipes_by_range(
+            self,
+            session: AsyncSession,
+            start_index: int,
+            end_index: int
+    ):
+        """
+        특정 범위의 레시피만 동기화 (수동 호출용)
+
+        Args:
+            session: DB 세션
+            start_index: 시작 인덱스 (1부터 시작)
+            end_index: 끝 인덱스 (포함)
+
+        Returns:
+            동기화된 레시피 수
+
+        Example:
+            # 레시피 1번부터 100번까지 동기화
+            await service.sync_recipes_by_range(session, 1, 100)
+        """
+        print(f"Syncing recipes from {start_index} to {end_index}...")
+
+        # API에서 레시피 가져오기 (change_date 없이 전체 가져오기)
+        recipes = await self.fetch_recipes_from_api(start_index, end_index, change_date=None)
+
+        if not recipes:
+            print(f"No recipes found in range {start_index}-{end_index}")
+            return 0
+
+        print(f"Fetched {len(recipes)} recipes from API")
+
+        # 각 레시피 동기화 (개별 커밋)
+        total_synced = 0
+        for recipe_data in recipes:
+            try:
+                result = await self.sync_recipe(session, recipe_data)
+                if result:
+                    # 각 레시피마다 개별 커밋
+                    await session.commit()
+                    total_synced += 1
+                    print(f"Synced recipe {recipe_data.get('RCP_SEQ')} ({total_synced}/{len(recipes)})")
+            except Exception as e:
+                # 에러 발생 시 롤백 후 다음 레시피 계속 처리
+                await session.rollback()
+                recipe_id = recipe_data.get('RCP_SEQ', 'unknown')
+                print(f"Failed to sync recipe {recipe_id}, rolled back: {str(e)}")
+
+        print(f"Range sync completed. Total synced: {total_synced}/{len(recipes)} recipes")
+        return total_synced
+
 
 recipe_sync_service = RecipeSyncService()
