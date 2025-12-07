@@ -49,10 +49,18 @@ async def sync_recipes_async():
     비동기로 레시피 동기화 실행
     """
     from app.core.db import async_engine
+    from sqlalchemy.orm import sessionmaker
     from sqlmodel.ext.asyncio.session import AsyncSession
     from app.services.recipe_sync_service import recipe_sync_service
 
-    async with AsyncSession(async_engine) as session:
+    # sessionmaker를 사용하여 expire_on_commit=False 설정 적용
+    async_session = sessionmaker(
+        async_engine,
+        class_=AsyncSession,
+        expire_on_commit=False
+    )
+
+    async with async_session() as session:
         total_synced = await recipe_sync_service.sync_all_recipes(
             session=session,
             batch_size=500,

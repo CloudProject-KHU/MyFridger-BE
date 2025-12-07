@@ -60,17 +60,43 @@ async def sync_recipes_by_range_async(start_index: int, end_index: int):
     """
     비동기로 특정 범위의 레시피 동기화 실행
     """
-    from app.core.db import async_engine
+    from app.core.config import settings
+    from sqlalchemy.ext.asyncio import create_async_engine
+    from sqlalchemy.orm import sessionmaker
     from sqlmodel.ext.asyncio.session import AsyncSession
     from app.services.recipe_sync_service import recipe_sync_service
+    import ssl
 
-    async with AsyncSession(async_engine) as session:
-        total_synced = await recipe_sync_service.sync_recipes_by_range(
-            session=session,
-            start_index=start_index,
-            end_index=end_index
+    # Lambda 환경에서는 매번 새로운 엔진 생성 (이벤트 루프 충돌 방지)
+    ssl_context = ssl.create_default_context()
+    ssl_context.check_hostname = False
+    ssl_context.verify_mode = ssl.CERT_NONE
+
+    engine = create_async_engine(
+        settings.DATABASE_URL,
+        echo=False,  # Lambda에서는 로그 최소화
+        future=True,
+        connect_args={"ssl": ssl_context} if settings.ENVIRONMENT == "production" else {},
+    )
+
+    try:
+        # sessionmaker를 사용하여 expire_on_commit=False 설정 적용
+        async_session = sessionmaker(
+            engine,
+            class_=AsyncSession,
+            expire_on_commit=False
         )
-        return total_synced
+
+        async with async_session() as session:
+            total_synced = await recipe_sync_service.sync_recipes_by_range(
+                session=session,
+                start_index=start_index,
+                end_index=end_index
+            )
+            return total_synced
+    finally:
+        # 엔진 정리 (연결 풀 닫기)
+        await engine.dispose()
 
 
 def lambda_handler(event, context):
