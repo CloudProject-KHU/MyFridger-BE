@@ -1,10 +1,20 @@
-from typing import List, Optional
+from typing import Annotated, List, Optional
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile, File
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Header,
+    Query,
+    status,
+    UploadFile,
+    File,
+)
 from sqlmodel import select, delete
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlalchemy import func
 
+from app.core.auth import get_current_user
 from app.core.db import get_session
 from app.models import (
     Material,
@@ -73,6 +83,7 @@ async def get_material(
 async def create_materials_from_receipt(
     file: UploadFile = File(...),
     session: AsyncSession = Depends(get_session),
+    user=Depends(get_current_user),
 ):
     content = await file.read()
 
@@ -111,6 +122,7 @@ async def create_materials_from_receipt(
             category="기타",
             purchased_at=func.now(),
             expired_at=func.now(),
+            user_id=user.id,
         )
         materials.append(material)
 
@@ -126,13 +138,18 @@ async def create_materials_from_receipt(
 
 
 @router.post(
-    "/manual", response_model=MaterialResponse, status_code=status.HTTP_201_CREATED
+    "/manual",
+    response_model=MaterialResponse,
+    status_code=status.HTTP_201_CREATED,
 )
 async def create_material(
     material: MaterialCreate,
     session: AsyncSession = Depends(get_session),
+    user=Depends(get_current_user),
 ):
-    db_material = Material.model_validate(material)
+    db_material = Material.model_validate(
+        Material(**material.model_dump(), user_id=user.id)
+    )
     session.add(db_material)
     await session.commit()
     await session.refresh(db_material)

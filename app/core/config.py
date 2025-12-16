@@ -12,14 +12,15 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
 
     # Database
-    DATABASE_NAME: str
-    DATABASE_USER: str
+    DATABASE_NAME: str = ""
+    DATABASE_USER: str = ""
     DATABASE_PASSWORD: Optional[str] = None  # Lambda에서 이 값이 없어도 죽지 않도록.
-    DATABASE_HOST: str
-    DATABASE_PORT: str
+    DATABASE_HOST: str = ""
+    DATABASE_PORT: str = ""
 
     # AWS
     AWS_REGION: str = "ap-northeast-2"  # 서울 리전 (기본)
+    AWS_COGNITO_USER_POOL: str = "" # User Pool ID
 
     # S3
     S3_BUCKET_NAME: str = ""  # CDK에서 생성된 버킷 이름
@@ -29,7 +30,7 @@ class Settings(BaseSettings):
     BEDROCK_REGION: str = "ap-northeast-2"  # Amazon Nova Lite 지원 리전 (서울)
 
     # API keys
-    OCR_API_KEY: str
+    OCR_API_KEY: str = ""
     FOOD_SAFETY_API_KEY: str = ""
     FOOD_SAFETY_API_BASE_URL: str = "http://openapi.foodsafetykorea.go.kr/api"
 
