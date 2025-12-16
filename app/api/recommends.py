@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel.ext.asyncio.session import AsyncSession
 from typing import List
 
+from app.core.auth import get_current_user
 from app.core.db import get_session
 from app.models.recipes import (
     RecipeRecommendationRequest,
@@ -24,7 +25,8 @@ router = APIRouter()
 @router.post("/recipes", response_model=RecommendationListResponse)
 async def get_recipe_recommendations(
     request: RecipeRecommendationRequest,
-    session: AsyncSession = Depends(get_session)
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_current_user)
 ):
     """
     사용자 보유 식재료 기반 레시피 추천
@@ -57,7 +59,7 @@ async def get_recipe_recommendations(
     try:
         recommendations = await recipe_recommendation_service.get_recipe_recommendations(
             session=session,
-            user_id=request.user_id,
+            user_id=user.id,
             limit=request.limit,
             min_match_ratio=request.min_match_ratio
         )
@@ -77,7 +79,8 @@ async def get_recipe_recommendations(
 async def create_recipe_feedback(
     recommendation_id: int,
     feedback: RecipeFeedbackRequest,
-    session: AsyncSession = Depends(get_session)
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_current_user)
 ):
     """
     레시피 추천에 대한 피드백 (좋아요/싫어요) 저장
@@ -99,7 +102,7 @@ async def create_recipe_feedback(
     try:
         result = await recipe_recommendation_service.save_feedback(
             session=session,
-            user_id=feedback.user_id,
+            user_id=user.id,
             recommendation_id=recommendation_id,
             liked=feedback.liked
         )
