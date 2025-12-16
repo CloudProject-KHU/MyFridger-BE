@@ -61,6 +61,15 @@ class BackendStack(Stack):
                 'OCR_KEY_HERE'  # 배포 후 콘솔에서 변경
             )
         )
+        self.cognito_user_pool_url = secretsmanager.Secret(
+            self,
+            "CognitoUserPoolUrl",
+            secret_name="fridger/cognito-user-pool-url",
+            description="Cognito User Pool URL",
+            secret_string_value=SecretValue.unsafe_plain_text(
+                'COGNITO_USER_POOL_URL_HERE'  # 배포 후 콘솔에서 변경
+            )
+        )
 
         # Recipe Sync Metadata를 Secret Manager에 저장
         # 초기값은 20000101로 설정
@@ -274,16 +283,19 @@ class BackendStack(Stack):
             "dnf update -y",
             "dnf install -y python3-pip unzip",
             "curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR='/usr/local/bin' sh",  # uv 설치
-            # 애플리케이션 코드 다운로드
+
+            # 애플리케이션 코드 다운로드 및 압축 해제
             "mkdir -p ~/app",
             f"aws s3 cp {app_asset.s3_object_url} ~/app/app.zip",
-            # 어플리케이션 압축 해제
             "unzip ~/app/app.zip -d ~/app",
+
             f"cat <<EOF > ~/app/.env\n{env_content}\nEOF",  # .env 생성
             # Secrets Manager에서 비밀번호 파싱 후 .env에 추가
             f"export DB_SECRET_NAME={self.db_instance.secret.secret_name}",
             f"export AWS_REGION={self.region}",
             f"export OCR_SECRET_NAME={self.ocr_api_key.secret_name}",
+            f"export COGNITO_SECRET_NAME={self.cognito_user_pool_url.secret_name}",
+
             # DB secret inject
             "DB_SECRET_JSON=$(aws secretsmanager get-secret-value --secret-id $DB_SECRET_NAME --region $AWS_REGION --query SecretString --output text)",
             "DB_PASSWORD=$(echo $DB_SECRET_JSON | jq -r .password)",
@@ -291,6 +303,10 @@ class BackendStack(Stack):
             # OCR API Key inject
             "OCR_API_KEY=$(aws secretsmanager get-secret-value --secret-id $OCR_SECRET_NAME --region $AWS_REGION --query SecretString --output text)",
             'echo "OCR_API_KEY=$OCR_API_KEY" >> ~/app/.env',
+            # Cognito User Pool URL inject
+            "COGNITO_USER_POOL_URL=$(aws secretsmanager get-secret-value --secret-id $COGNITO_SECRET_NAME --region $AWS_REGION --query SecretString --output text)",
+            'echo "AWS_COGNITO_USER_POOL=$COGNITO_USER_POOL_URL" >> ~/app/.env',
+
             # 의존성 설치 및 실행
             "cd ~/app && uv sync",
             "cd ~/app && uv run alembic upgrade head",
