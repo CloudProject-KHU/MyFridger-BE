@@ -7,6 +7,8 @@ from app.api import api_router
 from app.models import SQLModel
 import logging
 
+from dotenv import load_dotenv
+load_dotenv()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
